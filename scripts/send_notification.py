@@ -11,6 +11,7 @@ Or with custom parameters:
 
 import argparse
 import json
+import os
 import urllib.request
 import urllib.error
 
@@ -20,8 +21,8 @@ def send_notification(
     message: str = "Hello from notification script!",
     notification_type: str = "info",
     auto_close: int = 5000,
-    target_users: list = None,
-    actions: list = None
+    actions: list = None,
+    token: str = None
 ):
     """
     Send a notification to the JupyterLab notification extension.
@@ -31,12 +32,23 @@ def send_notification(
         message: Notification message text
         notification_type: Type of notification (default, info, success, warning, error, in-progress)
         auto_close: Auto-close timeout in milliseconds, or False to disable
-        target_users: List of usernames to target, or None for all users
         actions: List of action dictionaries with label, caption, and displayType
+        token: Authentication token (automatically detected from environment if not provided)
     """
+
+    # Auto-detect token from environment variables if not provided
+    if token is None:
+        token = (os.environ.get('JUPYTERHUB_API_TOKEN') or
+                 os.environ.get('JPY_API_TOKEN') or
+                 os.environ.get('JUPYTER_TOKEN'))
 
     # Construct the endpoint URL
     endpoint = f"{base_url}/jupyterlab-notifications-extension/ingest"
+
+    # Add token to URL if available
+    if token:
+        separator = '&' if '?' in endpoint else '?'
+        endpoint = f"{endpoint}{separator}token={token}"
 
     # Build notification payload
     payload = {
@@ -45,22 +57,26 @@ def send_notification(
         "autoClose": auto_close
     }
 
-    if target_users is not None:
-        payload["target_users"] = target_users
-
     if actions is not None:
         payload["actions"] = actions
 
     # Convert to JSON
     data = json.dumps(payload).encode('utf-8')
 
+    # Build headers
+    headers = {
+        'Content-Type': 'application/json'
+    }
+
+    # Add authorization header if token is available
+    if token:
+        headers['Authorization'] = f'token {token}'
+
     # Create request
     req = urllib.request.Request(
         endpoint,
         data=data,
-        headers={
-            'Content-Type': 'application/json'
-        },
+        headers=headers,
         method='POST'
     )
 
@@ -69,7 +85,6 @@ def send_notification(
             result = json.loads(response.read().decode('utf-8'))
             print(f"✓ Notification sent successfully!")
             print(f"  Notification ID: {result.get('notification_id')}")
-            print(f"  Target users: {result.get('target_users')}")
             return result
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8')
@@ -84,7 +99,19 @@ def send_notification(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Send notifications to JupyterLab notification extension"
+        description="Send notifications to JupyterLab notification extension",
+        epilog="""
+Examples:
+  # Send a basic info notification
+  %(prog)s --message "Hello World"
+
+  # Send a warning that stays until dismissed
+  %(prog)s --message "Maintenance in 1 hour" --type warning --no-auto-close
+
+  # Silent notification (notification center only)
+  %(prog)s --message "Background task done" --auto-close 0
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "--url",
@@ -93,14 +120,14 @@ def main():
     )
     parser.add_argument(
         "--message",
-        default="Hello from notification script!",
-        help="Notification message"
+        required=True,
+        help="Notification message (required)"
     )
     parser.add_argument(
         "--type",
         choices=["default", "info", "success", "warning", "error", "in-progress"],
         default="info",
-        help="Notification type"
+        help="Notification type (default: info)"
     )
     parser.add_argument(
         "--auto-close",
@@ -114,10 +141,9 @@ def main():
         help="Disable auto-close (notification stays until manually dismissed)"
     )
     parser.add_argument(
-        "--users",
-        nargs="+",
+        "--token",
         default=None,
-        help="Target specific users (space-separated usernames)"
+        help="Authentication token (auto-detected from JUPYTERHUB_API_TOKEN or JUPYTER_TOKEN env vars if not provided)"
     )
 
     args = parser.parse_args()
@@ -138,8 +164,8 @@ def main():
         message=args.message,
         notification_type=args.type,
         auto_close=auto_close,
-        target_users=args.users,
-        actions=actions
+        actions=actions,
+        token=args.token
     )
 
 

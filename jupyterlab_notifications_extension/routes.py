@@ -8,9 +8,8 @@ from jupyter_server.utils import url_path_join
 import tornado
 
 
-# In-memory storage for notifications per user
-# Structure: {username: [notification1, notification2, ...]}
-_notification_store: Dict[str, List[Dict]] = defaultdict(list)
+# In-memory storage for notifications (broadcast to all users)
+_notification_store: List[Dict] = []
 
 
 class NotificationIngestHandler(APIHandler):
@@ -22,7 +21,6 @@ class NotificationIngestHandler(APIHandler):
         "message": "Your notification message",
         "type": "info",  // optional: default, info, success, warning, error, in-progress
         "autoClose": 5000,  // optional: milliseconds or false for manual dismiss
-        "target_users": ["user1", "user2"],  // optional: specific users, or null for all
         "actions": [  // optional
             {
                 "label": "Click here",
@@ -54,27 +52,12 @@ class NotificationIngestHandler(APIHandler):
                 "actions": payload.get('actions', [])
             }
 
-            # Determine target users
-            target_users = payload.get('target_users', None)
-
-            if target_users is None:
-                # Broadcast to all current users in the store
-                # For new users, they won't see this (could be enhanced with persistent storage)
-                for username in _notification_store.keys():
-                    _notification_store[username].append(notification.copy())
-
-                # If no users in store yet, store for the next user who connects
-                if not _notification_store:
-                    _notification_store['__broadcast__'].append(notification.copy())
-            else:
-                # Send to specific users
-                for username in target_users:
-                    _notification_store[username].append(notification.copy())
+            # Add to broadcast queue
+            _notification_store.append(notification)
 
             self.finish(json.dumps({
                 "success": True,
-                "notification_id": notification['id'],
-                "target_users": target_users if target_users else "all"
+                "notification_id": notification['id']
             }))
 
         except json.JSONDecodeError:
@@ -88,26 +71,18 @@ class NotificationIngestHandler(APIHandler):
 class NotificationFetchHandler(APIHandler):
     """
     GET endpoint for frontend to fetch pending notifications.
-    Returns all pending notifications for the current user and clears them.
+    Returns all pending notifications and clears them.
     """
 
     @tornado.web.authenticated
     def get(self):
-        username = self.current_user['name']
+        global _notification_store
 
-        # Get user-specific notifications
-        notifications = _notification_store.get(username, []).copy()
+        # Get all pending notifications
+        notifications = _notification_store.copy()
 
-        # Get broadcast notifications (for first-time users)
-        broadcast_notifications = _notification_store.get('__broadcast__', []).copy()
-        notifications.extend(broadcast_notifications)
-
-        # Clear fetched notifications
-        _notification_store[username] = []
-
-        # Clear broadcast after first fetch (assumes at least one user has connected)
-        if '__broadcast__' in _notification_store:
-            del _notification_store['__broadcast__']
+        # Clear the queue
+        _notification_store = []
 
         self.finish(json.dumps({"notifications": notifications}))
 
