@@ -1,6 +1,10 @@
 # jupyterlab_notifications_extension
 
-[![Github Actions Status](/workflows/Build/badge.svg)](/actions/workflows/build.yml)
+[![GitHub Actions](https://github.com/stellarshenson/jupyterlab_notifications_extension/actions/workflows/build.yml/badge.svg)](https://github.com/stellarshenson/jupyterlab_notifications_extension/actions/workflows/build.yml)
+[![npm version](https://img.shields.io/npm/v/jupyterlab_notifications_extension.svg)](https://www.npmjs.com/package/jupyterlab_notifications_extension)
+[![PyPI version](https://img.shields.io/pypi/v/jupyterlab-notifications-extension.svg)](https://pypi.org/project/jupyterlab-notifications-extension/)
+[![Total PyPI downloads](https://static.pepy.tech/badge/jupyterlab-notifications-extension)](https://pepy.tech/project/jupyterlab-notifications-extension)
+[![JupyterLab 4](https://img.shields.io/badge/JupyterLab-4-orange.svg)](https://jupyterlab.readthedocs.io/en/stable/)
 
 Jupyterlab extension to receive and display notifications in the main panel. Those can be from the jupyterjub administrator or from other places.
 
@@ -19,6 +23,110 @@ To install the extension, execute:
 ```bash
 pip install jupyterlab_notifications_extension
 ```
+
+## Usage
+
+This extension enables external systems (administrators, monitoring systems, CI/CD pipelines) to send notifications that appear in JupyterLab's notification center.
+
+### Sending Notifications
+
+The extension provides a POST endpoint at `/jupyterlab-notifications-extension/ingest` that accepts notification payloads.
+
+**Notification Schema:**
+
+```json
+{
+  "message": "Your notification message",
+  "type": "info",
+  "autoClose": 5000,
+  "target_users": ["user1", "user2"],
+  "actions": [
+    {
+      "label": "Click here",
+      "caption": "Additional info",
+      "displayType": "accent"
+    }
+  ]
+}
+```
+
+**Field Descriptions:**
+
+- `message` (required): The notification message text
+- `type` (optional): Notification type - `default`, `info`, `success`, `warning`, `error`, or `in-progress` (default: `info`)
+- `autoClose` (optional): Auto-close timeout in milliseconds, or `false` to disable auto-close (default: `5000`)
+  - Use `0` for silent mode (adds to notification center without toast popup)
+- `target_users` (optional): Array of usernames to target, or `null`/omit for all users
+- `actions` (optional): Array of action buttons to display
+  - `label`: Button text
+  - `caption`: Tooltip text
+  - `displayType`: Visual style - `default`, `accent`, `warn`, or `link`
+
+### Example: Using the Test Script
+
+A test script is provided for sending notifications:
+
+```bash
+# Basic usage
+python scripts/send_notification.py
+
+# Custom message and type
+python scripts/send_notification.py --message "Deployment complete!" --type success
+
+# Warning that requires manual dismiss
+python scripts/send_notification.py \
+  --message "System maintenance in 1 hour" \
+  --type warning \
+  --no-auto-close
+
+# Target specific users
+python scripts/send_notification.py \
+  --message "Your job has completed" \
+  --type success \
+  --users alice bob
+
+# Silent notification (no toast, only in notification center)
+python scripts/send_notification.py \
+  --message "Background task finished" \
+  --auto-close 0
+```
+
+### Example: Using cURL
+
+```bash
+# Send a basic notification
+curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Hello from cURL!",
+    "type": "info",
+    "autoClose": 5000
+  }'
+
+# Send an error notification with action button
+curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Build failed on main branch",
+    "type": "error",
+    "autoClose": false,
+    "actions": [
+      {
+        "label": "View Logs",
+        "caption": "Click to see build logs",
+        "displayType": "accent"
+      }
+    ]
+  }'
+```
+
+### How It Works
+
+1. External systems POST notifications to the `/jupyterlab-notifications-extension/ingest` endpoint
+2. Server stores notifications in memory per user
+3. Frontend polls every 30 seconds for new notifications via `/jupyterlab-notifications-extension/notifications`
+4. Notifications are displayed using JupyterLab's built-in notification system
+5. Once fetched, notifications are removed from the server queue
 
 ## Uninstall
 
