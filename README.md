@@ -6,16 +6,9 @@
 [![Total PyPI downloads](https://static.pepy.tech/badge/jupyterlab-notifications-extension)](https://pepy.tech/project/jupyterlab-notifications-extension)
 [![JupyterLab 4](https://img.shields.io/badge/JupyterLab-4-orange.svg)](https://jupyterlab.readthedocs.io/en/stable/)
 
-JupyterLab extension enabling external systems to send notifications that appear in JupyterLab's notification center. Administrators, monitoring systems, and CI/CD pipelines can broadcast alerts, status updates, and system messages directly to users working in JupyterLab.
+JupyterLab extension enabling external systems to send notifications that appear in JupyterLab's notification center. Administrators, monitoring systems, and CI/CD pipelines broadcast alerts and status updates to users via a simple REST API.
 
-**Key capabilities**:
-- REST API endpoint for external notification ingestion
-- Automatic polling with 30-second refresh interval
-- Support for multiple notification types (info, success, warning, error)
-- Configurable auto-close behavior and action buttons
-- Built on JupyterLab's native notification system
-
-The extension consists of a Python server component providing REST endpoints and a TypeScript frontend that polls for new notifications and displays them using JupyterLab's built-in notification manager.
+The extension provides a POST endpoint for notification ingestion and polls every 30 seconds to display new notifications using JupyterLab's native notification system. Supports multiple notification types, configurable auto-close behavior, and optional action buttons.
 
 ## Installation
 
@@ -25,13 +18,15 @@ pip install jupyterlab_notifications_extension
 
 **Requirements**: JupyterLab >= 4.0.0
 
-## Usage
+## API Reference
 
-External systems send notifications via HTTP POST to the `/jupyterlab-notifications-extension/ingest` endpoint. The server queues notifications in memory and the frontend polls every 30 seconds to fetch and display them.
+### POST /jupyterlab-notifications-extension/ingest
 
-### Notification API
+Send notifications to JupyterLab users. Requires authentication via `Authorization: token <TOKEN>` header or `?token=<TOKEN>` query parameter.
 
-POST notifications to `/jupyterlab-notifications-extension/ingest` with JSON payload:
+**Endpoint**: `POST /jupyterlab-notifications-extension/ingest`
+
+**Request Body** (application/json):
 
 ```json
 {
@@ -48,46 +43,64 @@ POST notifications to `/jupyterlab-notifications-extension/ingest` with JSON pay
 }
 ```
 
-**Parameters**:
-- `message` (required) - Notification text displayed to users
-- `type` (optional) - Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress` (default: `info`)
-- `autoClose` (optional) - Milliseconds before auto-dismiss, `false` to require manual dismiss, `0` for silent mode (default: `5000`)
-- `actions` (optional) - Array of action buttons with `label`, `caption`, and `displayType` fields
+**Request Parameters**:
 
-Silent mode (`autoClose: 0`) adds notifications to the center without showing toast popups.
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `message` | string | Yes | - | Notification text displayed to users |
+| `type` | string | No | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress` |
+| `autoClose` | number/boolean | No | `5000` | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast) |
+| `actions` | array | No | `[]` | Action buttons (see below) |
 
-### Sending Notifications
+**Action Button Schema**:
 
-**Python script** (auto-detects authentication tokens from environment):
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `label` | string | Yes | - | Button text |
+| `caption` | string | No | `""` | Tooltip text |
+| `displayType` | string | No | `"default"` | Visual style: `default`, `accent`, `warn`, `link` |
+
+**Response** (200 OK):
+
+```json
+{
+  "success": true,
+  "notification_id": "notif_1762549476180_0"
+}
+```
+
+**Error Responses**:
+- `400 Bad Request` - Missing `message` field or invalid JSON
+- `401 Unauthorized` - Missing or invalid authentication token
+- `500 Internal Server Error` - Server-side processing error
+
+## Usage Examples
+
+### Python Script
+
+The included script auto-detects tokens from `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN`, or `JUPYTER_TOKEN` environment variables:
 
 ```bash
 # Basic notification
-python scripts/send_notification.py --message "Deployment complete" --type success
+./scripts/send_notification.py --message "Deployment complete" --type success
 
-# Persistent warning
-python scripts/send_notification.py \
-  --message "System maintenance in 1 hour" \
-  --type warning \
-  --no-auto-close
+# Persistent warning (no auto-close)
+./scripts/send_notification.py --message "System maintenance in 1 hour" --type warning --no-auto-close
 
-# Silent notification
-python scripts/send_notification.py \
-  --message "Background task finished" \
-  --auto-close 0
+# Silent mode (notification center only)
+./scripts/send_notification.py --message "Background task finished" --auto-close 0
 ```
 
-The script automatically detects authentication tokens from `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN`, or `JUPYTER_TOKEN` environment variables.
-
-**cURL** (manual authentication):
+### cURL
 
 ```bash
-# Info notification
+# Basic info notification
 curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
   -H "Content-Type: application/json" \
   -H "Authorization: token YOUR_TOKEN" \
   -d '{"message": "Build completed", "type": "info"}'
 
-# Error with action button
+# Error notification with action button
 curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
   -H "Content-Type: application/json" \
   -H "Authorization: token YOUR_TOKEN" \
@@ -103,16 +116,11 @@ curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
   }'
 ```
 
-### Architecture
+## Architecture
 
-The system uses a simple broadcast model where all notifications are delivered to all users.
+Broadcast-only model - all notifications delivered to all users.
 
-**Flow**:
-1. External system POSTs notification to `/jupyterlab-notifications-extension/ingest`
-2. Server stores notification in memory queue
-3. Frontend polls `/jupyterlab-notifications-extension/notifications` every 30 seconds
-4. Notifications display via JupyterLab's native notification manager
-5. Fetched notifications are removed from queue
+**Flow**: External system POSTs to `/jupyterlab-notifications-extension/ingest` -> Server queues in memory -> Frontend polls `/jupyterlab-notifications-extension/notifications` every 30 seconds -> Displays via JupyterLab notification manager -> Clears queue after fetch.
 
 ## Troubleshooting
 
