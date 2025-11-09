@@ -49,7 +49,8 @@ class NotificationIngestHandler(APIHandler):
                 "type": payload.get('type', 'info'),
                 "autoClose": payload.get('autoClose', 5000),
                 "createdAt": int(time.time() * 1000),
-                "actions": payload.get('actions', [])
+                "actions": payload.get('actions', []),
+                "data": payload.get('data')
             }
 
             # Add to broadcast queue

@@ -19,6 +19,7 @@ interface INotificationData {
     caption?: string;
     displayType?: 'default' | 'accent' | 'warn' | 'link';
   }>;
+  data?: any;
 }
 
 /**
@@ -47,6 +48,11 @@ async function fetchAndDisplayNotifications(
         const options: any = {
           autoClose: notif.autoClose
         };
+
+        // Add data field if present
+        if (notif.data !== undefined) {
+          options.data = notif.data;
+        }
 
         // Build actions array if present (actions are passed as part of options)
         if (notif.actions && notif.actions.length > 0) {

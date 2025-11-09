@@ -22,7 +22,9 @@ def send_notification(
     notification_type: str = "info",
     auto_close: int = 5000,
     actions: list = None,
-    token: str = None
+    data: dict = None,
+    token: str = None,
+    verbose: bool = False
 ):
     """
     Send a notification to the JupyterLab notification extension.
@@ -33,6 +35,7 @@ def send_notification(
         notification_type: Type of notification (default, info, success, warning, error, in-progress)
         auto_close: Auto-close timeout in milliseconds, or False to disable
         actions: List of action dictionaries with label, caption, and displayType
+        data: Optional arbitrary data to attach to the notification
         token: Authentication token (automatically detected from environment if not provided)
     """
 
@@ -60,8 +63,17 @@ def send_notification(
     if actions is not None:
         payload["actions"] = actions
 
+    if data is not None:
+        payload["data"] = data
+
     # Convert to JSON
     data = json.dumps(payload).encode('utf-8')
+
+    # Debug: print JSON body if verbose mode enabled
+    if verbose:
+        print(f"Sending JSON payload:")
+        print(json.dumps(payload, indent=2))
+        print()
 
     # Build headers
     headers = {
@@ -145,10 +157,30 @@ Examples:
         default=None,
         help="Authentication token (auto-detected from JUPYTERHUB_API_TOKEN or JUPYTER_TOKEN env vars if not provided)"
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print JSON payload for debugging"
+    )
+    parser.add_argument(
+        "--data",
+        type=str,
+        default=None,
+        help="JSON string of arbitrary data to attach to notification (e.g., '{\"url\": \"https://example.com\"}')"
+    )
 
     args = parser.parse_args()
 
     auto_close = False if args.no_auto_close else args.auto_close
+
+    # Parse data JSON if provided
+    data_dict = None
+    if args.data:
+        try:
+            data_dict = json.loads(args.data)
+        except json.JSONDecodeError as e:
+            print(f"✗ Error parsing --data JSON: {e}")
+            return
 
     # Example with action buttons
     actions = [
@@ -165,7 +197,9 @@ Examples:
         notification_type=args.type,
         auto_close=auto_close,
         actions=actions,
-        token=args.token
+        data=data_dict,
+        token=args.token,
+        verbose=args.verbose
     )
 
 
