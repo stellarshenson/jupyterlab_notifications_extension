@@ -96,6 +96,49 @@ const plugin: JupyterFrontEndPlugin<void> = {
       'JupyterLab extension jupyterlab_notifications_extension is activated!'
     );
 
+    // Register command to send notifications
+    app.commands.addCommand('jupyterlab-notifications:send', {
+      label: 'Send Notification',
+      caption: 'Send a notification to all JupyterLab users',
+      execute: async (args: any) => {
+        const message = args.message as string;
+        const type = (args.type as string) || 'info';
+        const autoClose = args.autoClose !== undefined ? args.autoClose : 5000;
+        const actions = args.actions || [];
+        const data = args.data;
+
+        if (!message) {
+          console.error('Notification message is required');
+          return;
+        }
+
+        try {
+          const payload: any = {
+            message,
+            type,
+            autoClose
+          };
+
+          if (actions.length > 0) {
+            payload.actions = actions;
+          }
+
+          if (data !== undefined) {
+            payload.data = data;
+          }
+
+          await requestAPI('ingest', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+
+          console.log('Notification sent successfully');
+        } catch (error) {
+          console.error('Failed to send notification:', error);
+        }
+      }
+    });
+
     // Fetch notifications immediately on startup
     fetchAndDisplayNotifications(app);
 
