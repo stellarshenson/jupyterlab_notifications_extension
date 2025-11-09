@@ -89,7 +89,28 @@ Note: Action buttons are purely visual. Clicking any button dismisses the notifi
 
 ### From Jupyter Notebook
 
-Send notifications from notebook cells using IPython's JavaScript magic:
+Send notifications from notebook cells using IPython's display API:
+
+```python
+from IPython.display import Javascript, display
+
+def send_notification(message, type='info', autoClose=5000):
+    """Send a notification to JupyterLab"""
+    js_code = f"""
+    window.jupyterlab.commands.execute('jupyterlab-notifications:send', {{
+      message: '{message}',
+      type: '{type}',
+      autoClose: {autoClose}
+    }});
+    """
+    display(Javascript(js_code))
+
+# Usage
+send_notification('Cell execution complete', type='success')
+send_notification('Long task finished', type='info', autoClose=10000)
+```
+
+Or use JavaScript magic directly:
 
 ```python
 %%javascript
