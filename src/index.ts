@@ -3,7 +3,8 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
-import { ICommandPalette, InputDialog } from '@jupyterlab/apputils';
+import { ICommandPalette, Dialog } from '@jupyterlab/apputils';
+import { Widget } from '@lumino/widgets';
 
 import { requestAPI } from './request';
 
@@ -159,11 +160,18 @@ const plugin: JupyterFrontEndPlugin<void> = {
           body.appendChild(typeSelect);
           body.appendChild(dismissLabel);
 
-          const result = await InputDialog.getText({
+          const widget = new Widget({ node: body });
+
+          const dialog = new Dialog({
             title: 'Send Notification',
-            label: body as any,
-            okLabel: 'Send'
+            body: widget,
+            buttons: [
+              Dialog.cancelButton(),
+              Dialog.okButton({ label: 'Send' })
+            ]
           });
+
+          const result = await dialog.launch();
 
           if (result.button.accept) {
             message = messageInput.value;
