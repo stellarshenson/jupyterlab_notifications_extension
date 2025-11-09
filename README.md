@@ -79,6 +79,32 @@ Note: Action buttons are purely visual. Clicking any button dismisses the notifi
 
 ## Usage Examples
 
+### JupyterLab Command (Programmatic)
+
+Send notifications from Jupyter notebooks or other JupyterLab extensions using the command API:
+
+```javascript
+// Basic notification
+await window.jupyterlab.commands.execute('jupyterlab-notifications:send', {
+  message: 'Cell execution complete'
+});
+
+// Custom type and auto-close
+await window.jupyterlab.commands.execute('jupyterlab-notifications:send', {
+  message: 'Build finished successfully',
+  type: 'success',
+  autoClose: 3000
+});
+
+// With action button
+await window.jupyterlab.commands.execute('jupyterlab-notifications:send', {
+  message: 'Error processing data',
+  type: 'error',
+  autoClose: false,
+  actions: [{label: 'View Details', displayType: 'accent'}]
+});
+```
+
 ### Python Script
 
 The included script auto-detects tokens from `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN`, or `JUPYTER_TOKEN` environment variables:
