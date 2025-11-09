@@ -43,14 +43,17 @@ test('should launch notification dialog from command', async ({ page }) => {
   await page.keyboard.press('Enter');
 
   // Verify dialog appears
-  await expect(page.locator('.jp-Dialog-header')).toContainText(
+  const dialog = page.locator('.jp-Dialog');
+  await expect(dialog.locator('.jp-Dialog-header')).toContainText(
     'Send Notification',
     { timeout: 5000 }
   );
 
-  // Verify form elements exist
-  await expect(page.locator('input[type="text"]')).toBeVisible();
-  await expect(page.locator('select')).toBeVisible();
+  // Verify form elements exist within dialog
+  await expect(
+    dialog.locator('input[placeholder="Enter notification message"]')
+  ).toBeVisible();
+  await expect(dialog.locator('select')).toBeVisible();
 
   // Close dialog
   await page.click('button:has-text("Cancel")');
