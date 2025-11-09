@@ -26,4 +26,3 @@ Major feature release adding command palette integration with interactive dialog
 - Command registered with ICommandPalette dependency
 - Form elements dynamically created and managed in TypeScript
 - Auto-close timing converted from seconds to milliseconds on submit
-
