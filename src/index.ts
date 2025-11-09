@@ -108,7 +108,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       execute: async (args: any) => {
         let message = args.message as string;
         let type = (args.type as string) || 'info';
-        const autoClose = args.autoClose !== undefined ? args.autoClose : 5000;
+        let autoClose = args.autoClose !== undefined ? args.autoClose : 5000;
         let actions = args.actions || [];
         const data = args.data;
 
@@ -142,6 +142,42 @@ const plugin: JupyterFrontEndPlugin<void> = {
             typeSelect.appendChild(option);
           });
 
+          // Auto-close checkbox and seconds input
+          const autoCloseContainer = document.createElement('div');
+          autoCloseContainer.style.display = 'flex';
+          autoCloseContainer.style.alignItems = 'center';
+          autoCloseContainer.style.gap = '10px';
+
+          const autoCloseCheckbox = document.createElement('input');
+          autoCloseCheckbox.type = 'checkbox';
+          autoCloseCheckbox.id = 'autoCloseCheckbox';
+          autoCloseCheckbox.checked = true;
+
+          const autoCloseLabel = document.createElement('label');
+          autoCloseLabel.htmlFor = 'autoCloseCheckbox';
+          autoCloseLabel.textContent = 'Auto-close after';
+          autoCloseLabel.style.cursor = 'pointer';
+
+          const autoCloseInput = document.createElement('input');
+          autoCloseInput.type = 'number';
+          autoCloseInput.value = '5';
+          autoCloseInput.min = '1';
+          autoCloseInput.style.width = '60px';
+          autoCloseInput.style.padding = '3px';
+
+          const secondsLabel = document.createElement('span');
+          secondsLabel.textContent = 'seconds';
+
+          autoCloseContainer.appendChild(autoCloseCheckbox);
+          autoCloseContainer.appendChild(autoCloseLabel);
+          autoCloseContainer.appendChild(autoCloseInput);
+          autoCloseContainer.appendChild(secondsLabel);
+
+          // Disable/enable input based on checkbox
+          autoCloseCheckbox.addEventListener('change', () => {
+            autoCloseInput.disabled = !autoCloseCheckbox.checked;
+          });
+
           // Dismiss button checkbox
           const dismissCheckbox = document.createElement('input');
           dismissCheckbox.type = 'checkbox';
@@ -152,12 +188,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
           dismissLabel.style.display = 'flex';
           dismissLabel.style.alignItems = 'center';
           dismissLabel.style.gap = '5px';
+          dismissLabel.style.cursor = 'pointer';
           dismissLabel.prepend(dismissCheckbox);
 
           body.appendChild(messageLabel);
           body.appendChild(messageInput);
           body.appendChild(typeLabel);
           body.appendChild(typeSelect);
+          body.appendChild(autoCloseContainer);
           body.appendChild(dismissLabel);
 
           const widget = new Widget({ node: body });
@@ -181,6 +219,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
             // Override with dialog values
             type = typeSelect.value;
+
+            // Set autoClose based on checkbox and input
+            if (autoCloseCheckbox.checked) {
+              autoClose = parseInt(autoCloseInput.value) * 1000; // Convert to milliseconds
+            } else {
+              autoClose = false;
+            }
+
             actions = dismissCheckbox.checked
               ? [
                   {
