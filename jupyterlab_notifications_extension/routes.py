@@ -88,31 +88,14 @@ class NotificationFetchHandler(APIHandler):
         self.finish(json.dumps({"notifications": notifications}))
 
 
-class HelloRouteHandler(APIHandler):
-    # The following decorator should be present on all verb methods (head, get, post,
-    # patch, put, delete, options) to ensure only authorized user can request the
-    # Jupyter server
-    @tornado.web.authenticated
-    def get(self):
-        self.finish(json.dumps({
-            "data": (
-                "Hello, world!"
-                " This is the '/jupyterlab-notifications-extension/hello' endpoint."
-                " Try visiting me in your browser!"
-            ),
-        }))
-
-
 def setup_route_handlers(web_app):
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]
 
-    hello_route_pattern = url_path_join(base_url, "jupyterlab-notifications-extension", "hello")
     ingest_route_pattern = url_path_join(base_url, "jupyterlab-notifications-extension", "ingest")
     fetch_route_pattern = url_path_join(base_url, "jupyterlab-notifications-extension", "notifications")
 
     handlers = [
-        (hello_route_pattern, HelloRouteHandler),
         (ingest_route_pattern, NotificationIngestHandler),
         (fetch_route_pattern, NotificationFetchHandler),
     ]
