@@ -87,18 +87,6 @@ Note: Action buttons are purely visual. Clicking any button dismisses the notifi
 
 ## Usage Examples
 
-### From Jupyter Notebook
-
-Send notifications from notebook cells using JavaScript magic:
-
-```python
-%%javascript
-window.jupyterlab.commands.execute('jupyterlab-notifications:send', {
-  message: 'Cell execution complete',
-  type: 'success'
-});
-```
-
 ### From JupyterLab Extensions
 
 Send notifications programmatically from other extensions:
