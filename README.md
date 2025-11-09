@@ -45,20 +45,20 @@ Send notifications to JupyterLab users. Requires authentication via `Authorizati
 
 **Request Parameters**:
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `message` | string | Yes | - | Notification text displayed to users |
-| `type` | string | No | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress` |
-| `autoClose` | number/boolean | No | `5000` | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast) |
-| `actions` | array | No | `[]` | Action buttons (see below) |
+| Field       | Type           | Required | Default  | Description                                                                                                             |
+| ----------- | -------------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `message`   | string         | Yes      | -        | Notification text displayed to users                                                                                    |
+| `type`      | string         | No       | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress`                                           |
+| `autoClose` | number/boolean | No       | `5000`   | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast) |
+| `actions`   | array          | No       | `[]`     | Action buttons (see below)                                                                                              |
 
 **Action Button Schema**:
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `label` | string | Yes | - | Button text |
-| `caption` | string | No | `""` | Tooltip text |
-| `displayType` | string | No | `"default"` | Visual style: `default`, `accent`, `warn`, `link` |
+| Field         | Type   | Required | Default     | Description                                       |
+| ------------- | ------ | -------- | ----------- | ------------------------------------------------- |
+| `label`       | string | Yes      | -           | Button text                                       |
+| `caption`     | string | No       | `""`        | Tooltip text                                      |
+| `displayType` | string | No       | `"default"` | Visual style: `default`, `accent`, `warn`, `link` |
 
 **Response** (200 OK):
 
@@ -70,6 +70,7 @@ Send notifications to JupyterLab users. Requires authentication via `Authorizati
 ```
 
 **Error Responses**:
+
 - `400 Bad Request` - Missing `message` field or invalid JSON
 - `401 Unauthorized` - Missing or invalid authentication token
 - `500 Internal Server Error` - Server-side processing error
@@ -125,11 +126,13 @@ Broadcast-only model - all notifications delivered to all users.
 ## Troubleshooting
 
 **Frontend installed but not working**:
+
 ```bash
 jupyter server extension list  # Verify server extension enabled
 ```
 
 **Server extension enabled but frontend missing**:
+
 ```bash
 jupyter labextension list  # Verify frontend extension installed
 ```
@@ -182,12 +185,14 @@ pip uninstall jupyterlab_notifications_extension
 ### Testing
 
 **Python tests** (Pytest):
+
 ```bash
 pip install -e ".[test]"
 pytest -vv -r ap --cov jupyterlab_notifications_extension
 ```
 
 **Frontend tests** (Jest):
+
 ```bash
 jlpm test
 ```
