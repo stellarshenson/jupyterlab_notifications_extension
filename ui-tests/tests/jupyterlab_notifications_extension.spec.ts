@@ -27,14 +27,25 @@ test('should emit an activation console message', async ({ page }) => {
 test('should launch notification dialog from command', async ({ page }) => {
   await page.goto();
 
-  // Execute the command programmatically (simpler than UI interaction)
-  await page.evaluate(() => {
-    window.jupyterlab.commands.execute('jupyterlab-notifications:send');
-  });
+  // Open command palette
+  await page.keyboard.press('Control+Shift+c');
+
+  // Wait for palette
+  await page.waitForSelector('.lm-CommandPalette');
+
+  // Type command name
+  await page.keyboard.type('Send Notification');
+
+  // Wait for filtered results
+  await page.waitForTimeout(300);
+
+  // Press Enter to execute first matching command
+  await page.keyboard.press('Enter');
 
   // Verify dialog appears
   await expect(page.locator('.jp-Dialog-header')).toContainText(
-    'Send Notification'
+    'Send Notification',
+    { timeout: 5000 }
   );
 
   // Verify form elements exist
