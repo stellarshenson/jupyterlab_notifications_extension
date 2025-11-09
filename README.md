@@ -60,6 +60,8 @@ Send notifications to JupyterLab users. Requires authentication via `Authorizati
 | `caption`     | string | No       | `""`        | Tooltip text                                      |
 | `displayType` | string | No       | `"default"` | Visual style: `default`, `accent`, `warn`, `link` |
 
+Note: Action buttons are purely visual. Clicking any button dismisses the notification using JupyterLab's native behavior. Buttons do not trigger custom callbacks or actions.
+
 **Response** (200 OK):
 
 ```json
