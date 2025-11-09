@@ -8,30 +8,28 @@
 
 JupyterLab extension for sending notifications. External systems and extensions send alerts and status updates that appear in JupyterLab's notification center.
 
+Five notification types with distinct visual styling provide clear status communication:
+
+![Notification Types](.resources/screenshot-notifications.png)
+
+Access via command palette for quick manual notification sending:
+
+![Command Palette](.resources/screenshot-palette.png)
+
+Interactive dialog with message input, type selection, auto-close timing, and action button options:
+
+![Send Dialog](.resources/screenshot-command.png)
+
 **Key Features:**
 
 - REST API for external systems to POST notifications with authentication
-- Command palette integration with interactive dialog (message, type, auto-close timing, action buttons)
+- Command palette integration with interactive dialog
 - Programmatic command API for extensions and automation
-- Five notification types with visual styling (info, success, warning, error, in-progress)
+- Five notification types (info, success, warning, error, in-progress)
 - Configurable auto-close with millisecond precision or manual dismiss
 - Optional action buttons (currently dismiss only)
 - Broadcast delivery via 30-second polling
 - In-memory queue cleared after delivery
-
-## Screenshots
-
-**Notification Types**
-
-![Notification Types](.resources/screenshot-notifications.png)
-
-**Command Palette**
-
-![Command Palette](.resources/screenshot-palette.png)
-
-**Send Notification Dialog**
-
-![Send Dialog](.resources/screenshot-command.png)
 
 ## Installation
 
