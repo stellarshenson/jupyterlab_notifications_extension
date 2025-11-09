@@ -6,7 +6,7 @@
 [![Total PyPI downloads](https://static.pepy.tech/badge/jupyterlab-notifications-extension)](https://pepy.tech/project/jupyterlab-notifications-extension)
 [![JupyterLab 4](https://img.shields.io/badge/JupyterLab-4-orange.svg)](https://jupyterlab.readthedocs.io/en/stable/)
 
-JupyterLab extension for sending notifications to users. External systems, notebooks, and other extensions can broadcast alerts and status updates that appear in JupyterLab's notification center.
+JupyterLab extension for sending notifications. External systems and other extensions can send alerts and status updates that appear in JupyterLab's notification center.
 
 **Features:**
 - REST API endpoint for external systems to send notifications
@@ -15,7 +15,7 @@ JupyterLab extension for sending notifications to users. External systems, noteb
 - Multiple notification types (info, success, warning, error, in-progress)
 - Configurable auto-close behavior
 - Optional action buttons
-- Broadcast to all JupyterLab users
+- Broadcast notifications to JupyterLab
 - 30-second polling interval for delivery
 
 ## Installation
@@ -30,7 +30,7 @@ pip install jupyterlab_notifications_extension
 
 ### POST /jupyterlab-notifications-extension/ingest
 
-Send notifications to JupyterLab users. Requires authentication via `Authorization: token <TOKEN>` header or `?token=<TOKEN>` query parameter.
+Send notifications to JupyterLab. Requires authentication via `Authorization: token <TOKEN>` header or `?token=<TOKEN>` query parameter.
 
 **Endpoint**: `POST /jupyterlab-notifications-extension/ingest`
 
@@ -55,7 +55,7 @@ Send notifications to JupyterLab users. Requires authentication via `Authorizati
 
 | Field       | Type           | Required | Default  | Description                                                                                                             |
 | ----------- | -------------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `message`   | string         | Yes      | -        | Notification text displayed to users                                                                                    |
+| `message`   | string         | Yes      | -        | Notification text (max 140 characters)                                                                                  |
 | `type`      | string         | No       | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress`                                           |
 | `autoClose` | number/boolean | No       | `5000`   | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast) |
 | `actions`   | array          | No       | `[]`     | Action buttons (see below)                                                                                              |
@@ -155,7 +155,7 @@ curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
 
 ## Architecture
 
-Broadcast-only model - all notifications delivered to all users.
+Broadcast-only model - all notifications delivered to the JupyterLab server.
 
 **Flow**: External system POSTs to `/jupyterlab-notifications-extension/ingest` -> Server queues in memory -> Frontend polls `/jupyterlab-notifications-extension/notifications` every 30 seconds -> Displays via JupyterLab notification manager -> Clears queue after fetch.
 
