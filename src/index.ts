@@ -3,7 +3,7 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
-import { ICommandPalette } from '@jupyterlab/apputils';
+import { ICommandPalette, InputDialog } from '@jupyterlab/apputils';
 
 import { requestAPI } from './request';
 
@@ -105,15 +105,25 @@ const plugin: JupyterFrontEndPlugin<void> = {
       label: 'Send Notification',
       caption: 'Send a notification to all JupyterLab users',
       execute: async (args: any) => {
-        const message = args.message as string;
+        let message = args.message as string;
         const type = (args.type as string) || 'info';
         const autoClose = args.autoClose !== undefined ? args.autoClose : 5000;
         const actions = args.actions || [];
         const data = args.data;
 
+        // If no message provided, show input dialog
         if (!message) {
-          console.error('Notification message is required');
-          return;
+          const result = await InputDialog.getText({
+            title: 'Send Notification',
+            label: 'Message:',
+            placeholder: 'Enter notification message'
+          });
+
+          if (result.button.accept && result.value) {
+            message = result.value;
+          } else {
+            return; // User cancelled
+          }
         }
 
         try {
