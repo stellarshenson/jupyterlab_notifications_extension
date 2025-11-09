@@ -1,4 +1,13 @@
 import json
+import pytest
+
+
+@pytest.fixture(autouse=True)
+async def clear_notification_store(jp_fetch):
+    """Clear notification store before each test"""
+    # Fetch all notifications to clear the queue
+    await jp_fetch("jupyterlab-notifications-extension", "notifications")
+    yield
 
 
 async def test_hello(jp_fetch):
