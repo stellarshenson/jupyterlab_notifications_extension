@@ -24,3 +24,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 7. **Task - Fix CI/CD formatting and dependency updates**: Resolve Prettier formatting issues and commit updated dependencies<br>
    **Result**: Fixed Prettier formatting issues across 5 files (.claude/CLAUDE.md, .claude/JOURNAL.md, package-lock.json, README.md, ui-tests/tests/jupyterlab_notifications_extension.spec.ts) by running jlpm prettier --write. Committed and pushed updated dependency packages (package-lock.json, package.json, yarn.lock) and formatting fixes. Link checker warnings for npm/PyPI badges acknowledged as expected since packages not yet published.
+
+8. **Task - Add verbose mode and fix test isolation**: Add debug output to test script and fix CI/CD test failures<br>
+   **Result**: Added --verbose flag to send_notification.py to print JSON payload before sending for debugging purposes. Tested verbose mode successfully with warning notification (no auto-close). Fixed CI/CD test failure in test_notification_fetch caused by shared notification store across tests - added autouse pytest fixture (clear_notification_store) that fetches all notifications before each test to ensure test isolation.
