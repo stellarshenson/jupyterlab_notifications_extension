@@ -3,6 +3,8 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
+import { ICommandPalette } from '@jupyterlab/apputils';
+
 import { requestAPI } from './request';
 
 /**
@@ -91,13 +93,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
   description:
     'Jupyterlab extension to receive and display notifications in the main panel. Those can be from the jupyterjub administrator or from other places.',
   autoStart: true,
-  activate: (app: JupyterFrontEnd) => {
+  requires: [ICommandPalette],
+  activate: (app: JupyterFrontEnd, palette: ICommandPalette) => {
     console.log(
       'JupyterLab extension jupyterlab_notifications_extension is activated!'
     );
 
     // Register command to send notifications
-    app.commands.addCommand('jupyterlab-notifications:send', {
+    const commandId = 'jupyterlab-notifications:send';
+    app.commands.addCommand(commandId, {
       label: 'Send Notification',
       caption: 'Send a notification to all JupyterLab users',
       execute: async (args: any) => {
@@ -138,6 +142,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
         }
       }
     });
+
+    // Add command to palette
+    palette.addItem({ command: commandId, category: 'Notifications' });
 
     // Fetch notifications immediately on startup
     fetchAndDisplayNotifications(app);
