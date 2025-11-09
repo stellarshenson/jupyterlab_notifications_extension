@@ -106,21 +106,82 @@ const plugin: JupyterFrontEndPlugin<void> = {
       caption: 'Send a notification to all JupyterLab users',
       execute: async (args: any) => {
         let message = args.message as string;
-        const type = (args.type as string) || 'info';
+        let type = (args.type as string) || 'info';
         const autoClose = args.autoClose !== undefined ? args.autoClose : 5000;
-        const actions = args.actions || [];
+        let actions = args.actions || [];
         const data = args.data;
 
         // If no message provided, show input dialog
         if (!message) {
-          const result = await InputDialog.getText({
-            title: 'Send Notification',
-            label: 'Message:',
-            placeholder: 'Enter notification message'
+          // Create dialog body with form elements
+          const body = document.createElement('div');
+          body.style.display = 'flex';
+          body.style.flexDirection = 'column';
+          body.style.gap = '10px';
+
+          // Message input
+          const messageLabel = document.createElement('label');
+          messageLabel.textContent = 'Message:';
+          const messageInput = document.createElement('input');
+          messageInput.type = 'text';
+          messageInput.placeholder = 'Enter notification message';
+          messageInput.style.width = '100%';
+          messageInput.style.padding = '5px';
+
+          // Type select
+          const typeLabel = document.createElement('label');
+          typeLabel.textContent = 'Type:';
+          const typeSelect = document.createElement('select');
+          typeSelect.style.width = '100%';
+          typeSelect.style.padding = '5px';
+          ['info', 'success', 'warning', 'error', 'in-progress'].forEach(t => {
+            const option = document.createElement('option');
+            option.value = t;
+            option.textContent = t;
+            typeSelect.appendChild(option);
           });
 
-          if (result.button.accept && result.value) {
-            message = result.value;
+          // Dismiss button checkbox
+          const dismissCheckbox = document.createElement('input');
+          dismissCheckbox.type = 'checkbox';
+          dismissCheckbox.id = 'dismissCheckbox';
+          const dismissLabel = document.createElement('label');
+          dismissLabel.htmlFor = 'dismissCheckbox';
+          dismissLabel.textContent = ' Include dismiss button';
+          dismissLabel.style.display = 'flex';
+          dismissLabel.style.alignItems = 'center';
+          dismissLabel.style.gap = '5px';
+          dismissLabel.prepend(dismissCheckbox);
+
+          body.appendChild(messageLabel);
+          body.appendChild(messageInput);
+          body.appendChild(typeLabel);
+          body.appendChild(typeSelect);
+          body.appendChild(dismissLabel);
+
+          const result = await InputDialog.getText({
+            title: 'Send Notification',
+            label: body as any,
+            okLabel: 'Send'
+          });
+
+          if (result.button.accept) {
+            message = messageInput.value;
+            if (!message) {
+              return; // No message entered
+            }
+
+            // Override with dialog values
+            type = typeSelect.value;
+            actions = dismissCheckbox.checked
+              ? [
+                  {
+                    label: 'Dismiss',
+                    caption: 'Close this notification',
+                    displayType: 'default'
+                  }
+                ]
+              : [];
           } else {
             return; // User cancelled
           }
