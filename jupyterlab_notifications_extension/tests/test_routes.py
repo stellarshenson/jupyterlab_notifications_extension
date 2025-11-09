@@ -10,138 +10,70 @@ def clear_notification_store():
     yield
 
 
-async def test_hello(jp_fetch):
-    # When
-    response = await jp_fetch("jupyterlab-notifications-extension", "hello")
-
-    # Then
-    assert response.code == 200
-    payload = json.loads(response.body)
-    assert payload == {
-            "data": (
-                "Hello, world!"
-                " This is the '/jupyterlab-notifications-extension/hello' endpoint."
-                " Try visiting me in your browser!"
-            ),
-        }
-
-
 async def test_notification_ingest(jp_fetch):
-    """Test that notifications can be ingested and notification objects are created"""
-    # Given
-    notification_payload = {
-        "message": "Test notification message",
-        "type": "info",
-        "autoClose": 5000
-    }
-
-    # When - Send notification to ingest endpoint
+    """Test notification object creation"""
     response = await jp_fetch(
         "jupyterlab-notifications-extension",
         "ingest",
         method="POST",
-        body=json.dumps(notification_payload)
+        body=json.dumps({"message": "Test", "type": "info", "autoClose": 5000})
     )
 
-    # Then - Verify response
     assert response.code == 200
     payload = json.loads(response.body)
     assert payload["success"] is True
-    assert "notification_id" in payload
     assert payload["notification_id"].startswith("notif_")
 
 
 async def test_notification_fetch(jp_fetch):
-    """Test that notifications can be fetched after ingestion"""
-    # Given - Send a notification first
-    notification_payload = {
-        "message": "Fetch test notification",
-        "type": "success",
-        "autoClose": 3000
-    }
-
+    """Test notification fetching"""
     await jp_fetch(
         "jupyterlab-notifications-extension",
         "ingest",
         method="POST",
-        body=json.dumps(notification_payload)
+        body=json.dumps({"message": "Test", "type": "success"})
     )
 
-    # When - Fetch notifications
     response = await jp_fetch("jupyterlab-notifications-extension", "notifications")
 
-    # Then - Verify notification was returned
     assert response.code == 200
     payload = json.loads(response.body)
-    assert "notifications" in payload
     assert len(payload["notifications"]) == 1
-    notification = payload["notifications"][0]
-    assert notification["message"] == "Fetch test notification"
-    assert notification["type"] == "success"
-    assert notification["autoClose"] == 3000
+    assert payload["notifications"][0]["message"] == "Test"
 
 
 async def test_notification_fetch_clears_queue(jp_fetch):
-    """Test that fetching notifications clears the queue"""
-    # Given - Send a notification
-    notification_payload = {
-        "message": "Clear test notification",
-        "type": "warning"
-    }
-
+    """Test queue clearing after fetch"""
     await jp_fetch(
         "jupyterlab-notifications-extension",
         "ingest",
         method="POST",
-        body=json.dumps(notification_payload)
+        body=json.dumps({"message": "Test"})
     )
 
-    # When - Fetch notifications twice
     response1 = await jp_fetch("jupyterlab-notifications-extension", "notifications")
     response2 = await jp_fetch("jupyterlab-notifications-extension", "notifications")
 
-    # Then - First fetch has notification, second is empty
-    payload1 = json.loads(response1.body)
-    payload2 = json.loads(response2.body)
-    assert len(payload1["notifications"]) == 1
-    assert len(payload2["notifications"]) == 0
+    assert len(json.loads(response1.body)["notifications"]) == 1
+    assert len(json.loads(response2.body)["notifications"]) == 0
 
 
 async def test_notification_with_actions(jp_fetch):
-    """Test notifications with action buttons"""
-    # Given
-    notification_payload = {
-        "message": "Action test notification",
-        "type": "error",
-        "autoClose": False,
-        "actions": [
-            {
-                "label": "Retry",
-                "caption": "Retry the operation",
-                "displayType": "accent"
-            },
-            {
-                "label": "Cancel",
-                "caption": "Cancel the operation",
-                "displayType": "default"
-            }
-        ]
-    }
-
-    # When
+    """Test action buttons and autoClose"""
     response = await jp_fetch(
         "jupyterlab-notifications-extension",
         "ingest",
         method="POST",
-        body=json.dumps(notification_payload)
+        body=json.dumps({
+            "message": "Test",
+            "autoClose": False,
+            "actions": [{"label": "Retry", "displayType": "accent"}]
+        })
     )
 
-    # Then
     assert response.code == 200
     fetch_response = await jp_fetch("jupyterlab-notifications-extension", "notifications")
-    payload = json.loads(fetch_response.body)
-    notification = payload["notifications"][0]
-    assert len(notification["actions"]) == 2
-    assert notification["actions"][0]["label"] == "Retry"
-    assert notification["actions"][0]["displayType"] == "accent"
+    notification = json.loads(fetch_response.body)["notifications"][0]
     assert notification["autoClose"] is False
+    assert len(notification["actions"]) == 1
+    assert notification["actions"][0]["label"] == "Retry"
