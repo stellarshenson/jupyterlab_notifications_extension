@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
-## 1.1.8
+## 1.1.11
 
 ### Features
 

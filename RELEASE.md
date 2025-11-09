@@ -1,6 +1,6 @@
 # Release Notes
 
-## 1.1.8
+## 1.1.11
 
 Major feature release adding command palette integration with interactive dialog.
 
