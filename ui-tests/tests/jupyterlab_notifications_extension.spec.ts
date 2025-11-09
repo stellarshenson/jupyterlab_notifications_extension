@@ -24,15 +24,23 @@ test('should emit an activation console message', async ({ page }) => {
   ).toHaveLength(1);
 });
 
-test('should have Send Notification command registered', async ({ page }) => {
+test('should launch notification dialog from command', async ({ page }) => {
   await page.goto();
 
-  // Verify extension loaded by checking command is registered
-  const commandExists = await page.evaluate(() => {
-    return window.jupyterlab.commands.hasCommand(
-      'jupyterlab-notifications:send'
-    );
+  // Execute the command programmatically (simpler than UI interaction)
+  await page.evaluate(() => {
+    window.jupyterlab.commands.execute('jupyterlab-notifications:send');
   });
 
-  expect(commandExists).toBe(true);
+  // Verify dialog appears
+  await expect(page.locator('.jp-Dialog-header')).toContainText(
+    'Send Notification'
+  );
+
+  // Verify form elements exist
+  await expect(page.locator('input[type="text"]')).toBeVisible();
+  await expect(page.locator('select')).toBeVisible();
+
+  // Close dialog
+  await page.click('button:has-text("Cancel")');
 });
