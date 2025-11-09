@@ -6,18 +6,18 @@
 [![Total PyPI downloads](https://static.pepy.tech/badge/jupyterlab-notifications-extension)](https://pepy.tech/project/jupyterlab-notifications-extension)
 [![JupyterLab 4](https://img.shields.io/badge/JupyterLab-4-orange.svg)](https://jupyterlab.readthedocs.io/en/stable/)
 
-JupyterLab extension for sending notifications. External systems and other extensions can send alerts and status updates that appear in JupyterLab's notification center.
+JupyterLab extension for sending notifications. External systems and extensions send alerts and status updates that appear in JupyterLab's notification center.
 
-**Features:**
+**Key Features:**
 
-- REST API endpoint for external systems to send notifications
-- JupyterLab command for programmatic notifications from notebooks and extensions
-- Command palette integration with dialog UI
-- Multiple notification types (info, success, warning, error, in-progress)
-- Configurable auto-close behavior
-- Optional action buttons
-- Broadcast notifications to JupyterLab
-- 30-second polling interval for delivery
+- REST API for external systems to POST notifications with authentication
+- Command palette integration with interactive dialog (message, type, auto-close timing, action buttons)
+- Programmatic command API for extensions and automation
+- Five notification types with visual styling (info, success, warning, error, in-progress)
+- Configurable auto-close with millisecond precision or manual dismiss
+- Optional action buttons (currently dismiss only)
+- Broadcast delivery via 30-second polling
+- In-memory queue cleared after delivery
 
 ## Installation
 
