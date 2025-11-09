@@ -203,10 +203,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
           const dialog = new Dialog({
             title: 'Send Notification',
             body: widget,
-            buttons: [
-              Dialog.cancelButton(),
-              Dialog.okButton({ label: 'Send' })
-            ]
+            buttons: [Dialog.cancelButton(), Dialog.okButton({ label: 'Send' })]
           });
 
           const result = await dialog.launch();

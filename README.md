@@ -9,6 +9,7 @@
 JupyterLab extension for sending notifications. External systems and other extensions can send alerts and status updates that appear in JupyterLab's notification center.
 
 **Features:**
+
 - REST API endpoint for external systems to send notifications
 - JupyterLab command for programmatic notifications from notebooks and extensions
 - Command palette integration with dialog UI
@@ -109,7 +110,7 @@ await app.commands.execute('jupyterlab-notifications:send', {
   message: 'Error processing data',
   type: 'error',
   autoClose: false,
-  actions: [{label: 'View Details', displayType: 'accent'}]
+  actions: [{ label: 'View Details', displayType: 'accent' }]
 });
 ```
 
