@@ -161,9 +161,3 @@ jobs:
       - uses: actions/checkout@v4
       - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
       - uses: jupyterlab/maintainer-tools/.github/actions/check-links@v1
-        with:
-          ignore_links: |
-            https://www.npmjs.com/package/jupyterlab_notifications_extension
-            https://pypi.org/project/jupyterlab-notifications-extension/
-            https://pepy.tech/project/jupyterlab-notifications-extension
-            https://static.pepy.tech/badge/jupyterlab-notifications-extension
