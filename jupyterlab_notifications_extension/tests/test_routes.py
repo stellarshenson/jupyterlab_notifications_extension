@@ -1,12 +1,12 @@
 import json
 import pytest
+from jupyterlab_notifications_extension import routes
 
 
 @pytest.fixture(autouse=True)
-async def clear_notification_store(jp_fetch):
+def clear_notification_store():
     """Clear notification store before each test"""
-    # Fetch all notifications to clear the queue
-    await jp_fetch("jupyterlab-notifications-extension", "notifications")
+    routes._notification_store.clear()
     yield
 
 
