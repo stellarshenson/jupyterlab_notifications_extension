@@ -1,6 +1,6 @@
 # Release Notes
 
-## 1.1.8 (2025-11-09)
+## 1.1.8
 
 Major feature release adding command palette integration with interactive dialog.
 
@@ -24,7 +24,7 @@ Major feature release adding command palette integration with interactive dialog
 - Form elements dynamically created and managed in TypeScript
 - Auto-close timing converted from seconds to milliseconds on submit
 
-## 1.0.19 (2025-11-09)
+## 1.0.19
 
 Initial release of JupyterLab Notifications Extension.
 
