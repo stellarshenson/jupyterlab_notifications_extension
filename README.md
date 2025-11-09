@@ -19,6 +19,20 @@ JupyterLab extension for sending notifications. External systems and extensions 
 - Broadcast delivery via 30-second polling
 - In-memory queue cleared after delivery
 
+## Screenshots
+
+**Notification Types**
+
+![Notification Types](.resources/screenshot-notifications.png)
+
+**Command Palette**
+
+![Command Palette](.resources/screenshot-palette.png)
+
+**Send Notification Dialog**
+
+![Send Dialog](.resources/screenshot-command.png)
+
 ## Installation
 
 ```bash
