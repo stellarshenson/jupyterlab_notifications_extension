@@ -6,7 +6,7 @@
 [![Total PyPI downloads](https://static.pepy.tech/badge/jupyterlab-notifications-extension)](https://pepy.tech/project/jupyterlab-notifications-extension)
 [![JupyterLab 4](https://img.shields.io/badge/JupyterLab-4-orange.svg)](https://jupyterlab.readthedocs.io/en/stable/)
 
-JupyterLab extension for sending notifications. External systems and extensions send alerts and status updates that appear in JupyterLab's notification center.
+JupyterLab extension for sending notifications using the native JupyterLab notification system. External systems and extensions send alerts and status updates that appear in JupyterLab's notification center.
 
 Five notification types with distinct visual styling provide clear status communication:
 
