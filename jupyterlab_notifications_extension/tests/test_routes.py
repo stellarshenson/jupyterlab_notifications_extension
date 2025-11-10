@@ -97,23 +97,23 @@ async def test_localhost_no_auth_required(jp_fetch):
 
 async def test_remote_ip_requires_auth(jp_fetch, jp_serverapp):
     """Test that non-localhost requests require authentication"""
-    from unittest.mock import patch
+    from unittest.mock import patch, MagicMock
     from tornado.httpclient import HTTPRequest, HTTPError
+    from jupyter_server.base.handlers import APIHandler
 
-    # Create a request that appears to come from a remote IP
-    # We'll use jp_fetch but mock the remote_ip to simulate remote access
+    # Mock both _is_localhost to return False and get_current_user to return None
+    # This simulates a remote request without authentication
     with patch('jupyterlab_notifications_extension.routes.NotificationIngestHandler._is_localhost', return_value=False):
-        # Attempt to send notification without authentication from "remote" IP
-        # This should fail with 403
-        with pytest.raises(HTTPError) as exc_info:
-            await jp_fetch(
-                "jupyterlab-notifications-extension",
-                "ingest",
-                method="POST",
-                body=json.dumps({"message": "Remote test"}),
-                # Remove authentication by using allow_nonstandard_methods
-                # and not passing auth headers
-            )
+        with patch.object(APIHandler, 'get_current_user', return_value=None):
+            # Attempt to send notification without authentication from "remote" IP
+            # This should fail with 403
+            with pytest.raises(HTTPError) as exc_info:
+                await jp_fetch(
+                    "jupyterlab-notifications-extension",
+                    "ingest",
+                    method="POST",
+                    body=json.dumps({"message": "Remote test"}),
+                )
 
-        # The handler should reject with 403 Forbidden
-        assert exc_info.value.code == 403
+            # The handler should reject with 403 Forbidden
+            assert exc_info.value.code == 403
