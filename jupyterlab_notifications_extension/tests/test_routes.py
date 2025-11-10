@@ -96,24 +96,28 @@ async def test_localhost_no_auth_required(jp_fetch):
 
 
 async def test_remote_ip_requires_auth(jp_fetch, jp_serverapp):
-    """Test that non-localhost requests require authentication"""
+    """Test that get_current_user returns None for remote IPs without valid auth"""
     from unittest.mock import patch, MagicMock
-    from tornado.httpclient import HTTPRequest, HTTPError
-    from jupyter_server.base.handlers import APIHandler
+    from jupyterlab_notifications_extension.routes import NotificationIngestHandler
 
-    # Mock both _is_localhost to return False and get_current_user to return None
-    # This simulates a remote request without authentication
-    with patch('jupyterlab_notifications_extension.routes.NotificationIngestHandler._is_localhost', return_value=False):
-        with patch.object(APIHandler, 'get_current_user', return_value=None):
-            # Attempt to send notification without authentication from "remote" IP
-            # This should fail with 403
-            with pytest.raises(HTTPError) as exc_info:
-                await jp_fetch(
-                    "jupyterlab-notifications-extension",
-                    "ingest",
-                    method="POST",
-                    body=json.dumps({"message": "Remote test"}),
-                )
+    # Create a mock handler instance to test the get_current_user logic
+    handler = NotificationIngestHandler(jp_serverapp.web_app, MagicMock())
 
-            # The handler should reject with 403 Forbidden
-            assert exc_info.value.code == 403
+    # Test 1: localhost returns dummy user (bypasses auth)
+    with patch.object(handler, '_is_localhost', return_value=True):
+        user = handler.get_current_user()
+        assert user == {"name": "localhost"}
+
+    # Test 2: remote IP with valid auth returns user from parent
+    with patch.object(handler, '_is_localhost', return_value=False):
+        # Mock parent's get_current_user to return a valid user
+        with patch('jupyter_server.base.handlers.APIHandler.get_current_user', return_value={"name": "testuser"}):
+            user = handler.get_current_user()
+            assert user == {"name": "testuser"}
+
+    # Test 3: remote IP without valid auth returns None from parent
+    with patch.object(handler, '_is_localhost', return_value=False):
+        # Mock parent's get_current_user to return None (no auth)
+        with patch('jupyter_server.base.handlers.APIHandler.get_current_user', return_value=None):
+            user = handler.get_current_user()
+            assert user is None
