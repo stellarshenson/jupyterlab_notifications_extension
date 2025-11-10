@@ -6,8 +6,17 @@ Localhost requests do not require authentication tokens.
 Remote requests require token via --token argument or environment variables.
 
 Usage:
+    # Default (localhost on port 8888)
     python scripts/send_notification.py --message "Your message here"
+
+    # With custom type
     python scripts/send_notification.py --message "Your message here" --type warning
+
+    # JupyterHub environment (use 127.0.0.1 with full path including /jupyterhub/user/<username>)
+    python scripts/send_notification.py --url "http://127.0.0.1:8888/jupyterhub/user/konrad" --message "Test"
+
+    # Remote server (requires token)
+    python scripts/send_notification.py --url "http://remote-server:8888" --message "Test" --token "your-token"
 """
 
 import argparse
