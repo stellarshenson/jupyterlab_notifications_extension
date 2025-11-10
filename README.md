@@ -8,7 +8,7 @@
 
 JupyterLab extension for sending notifications using the native JupyterLab notification system. External systems and extensions send alerts and status updates that appear in JupyterLab's notification center.
 
-This extension serves as the notification backbone for [Stellars JupyterHub Platform for Data Science](https://github.com/stellarshenson/stellars-jupyterhub-ds), providing system administrators and automated workflows with a unified notification channel to communicate with data scientists and analysts.
+This extension serves as the notification backbone for [Stellars JupyterHub Platform for Data Science](https://github.com/stellarshenson/stellars-jupyterhub-ds), allowing administrators to broadcast notification messages to all running JupyterLab servers.
 
 Five notification types with distinct visual styling provide clear status communication:
 
