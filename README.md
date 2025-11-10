@@ -45,7 +45,7 @@ pip install jupyterlab_notifications_extension
 
 ### POST /jupyterlab-notifications-extension/ingest
 
-Send notifications to JupyterLab. Requires authentication via `Authorization: token <TOKEN>` header or `?token=<TOKEN>` query parameter.
+Send notifications to JupyterLab. Requires authentication via `Authorization: token <TOKEN>` header or `?token=<TOKEN>` query parameter. Requests from localhost (127.0.0.1, ::1) skip authentication.
 
 **Endpoint**: `POST /jupyterlab-notifications-extension/ingest`
 

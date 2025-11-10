@@ -77,3 +77,43 @@ async def test_notification_with_actions(jp_fetch):
     assert notification["autoClose"] is False
     assert len(notification["actions"]) == 1
     assert notification["actions"][0]["label"] == "Retry"
+
+
+async def test_localhost_no_auth_required(jp_fetch):
+    """Test that localhost requests work without authentication"""
+    # jp_fetch uses localhost by default, so we'll make a request without auth headers
+    # The handler should detect localhost and skip authentication
+    response = await jp_fetch(
+        "jupyterlab-notifications-extension",
+        "ingest",
+        method="POST",
+        body=json.dumps({"message": "Localhost test", "type": "info"})
+    )
+
+    assert response.code == 200
+    payload = json.loads(response.body)
+    assert payload["success"] is True
+
+
+async def test_remote_ip_requires_auth(jp_fetch, jp_serverapp):
+    """Test that non-localhost requests require authentication"""
+    from unittest.mock import patch
+    from tornado.httpclient import HTTPRequest, HTTPError
+
+    # Create a request that appears to come from a remote IP
+    # We'll use jp_fetch but mock the remote_ip to simulate remote access
+    with patch('jupyterlab_notifications_extension.routes.NotificationIngestHandler._is_localhost', return_value=False):
+        # Attempt to send notification without authentication from "remote" IP
+        # This should fail with 403
+        with pytest.raises(HTTPError) as exc_info:
+            await jp_fetch(
+                "jupyterlab-notifications-extension",
+                "ingest",
+                method="POST",
+                body=json.dumps({"message": "Remote test"}),
+                # Remove authentication by using allow_nonstandard_methods
+                # and not passing auth headers
+            )
+
+        # The handler should reject with 403 Forbidden
+        assert exc_info.value.code == 403

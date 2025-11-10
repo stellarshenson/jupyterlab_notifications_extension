@@ -31,7 +31,18 @@ class NotificationIngestHandler(APIHandler):
     }
     """
 
-    @tornado.web.authenticated
+    def _is_localhost(self):
+        """Check if request is from localhost"""
+        remote_ip = self.request.remote_ip
+        return remote_ip in ('127.0.0.1', '::1', 'localhost')
+
+    def prepare(self):
+        """Override prepare to conditionally skip authentication for localhost"""
+        if not self._is_localhost():
+            # Only require authentication for non-localhost requests
+            if not self.current_user:
+                raise tornado.web.HTTPError(403)
+
     def post(self):
         try:
             payload = json.loads(self.request.body.decode('utf-8'))

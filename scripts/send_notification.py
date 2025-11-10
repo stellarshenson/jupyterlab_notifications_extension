@@ -2,10 +2,11 @@
 """
 Script to send notifications to JupyterLab via the notification extension.
 
-Usage:
-    python scripts/send_notification.py
+Localhost requests do not require authentication tokens.
+Remote requests require token via --token argument or environment variables.
 
-Or with custom parameters:
+Usage:
+    python scripts/send_notification.py --message "Your message here"
     python scripts/send_notification.py --message "Your message here" --type warning
 """
 
@@ -36,20 +37,32 @@ def send_notification(
         auto_close: Auto-close timeout in milliseconds, or False to disable
         actions: List of action dictionaries with label, caption, and displayType
         data: Optional arbitrary data to attach to the notification
-        token: Authentication token (automatically detected from environment if not provided)
+        token: Authentication token (optional for localhost, automatically detected from environment if not provided)
     """
 
-    # Auto-detect token from environment variables if not provided
-    if token is None:
+    # Check if target is localhost
+    is_localhost = base_url.startswith('http://localhost') or base_url.startswith('http://127.0.0.1') or base_url.startswith('http://[::1]')
+
+    # Auto-detect token from environment variables if not provided (skip for localhost)
+    if not is_localhost and token is None:
         token = (os.environ.get('JUPYTERHUB_API_TOKEN') or
                  os.environ.get('JPY_API_TOKEN') or
                  os.environ.get('JUPYTER_TOKEN'))
 
+    if verbose:
+        if is_localhost:
+            print(f"Target is localhost - skipping authentication")
+        elif token:
+            print(f"Using authentication token")
+        else:
+            print(f"No token provided for remote host")
+        print()
+
     # Construct the endpoint URL
     endpoint = f"{base_url}/jupyterlab-notifications-extension/ingest"
 
-    # Add token to URL if available
-    if token:
+    # Add token to URL if available and not localhost
+    if token and not is_localhost:
         separator = '&' if '?' in endpoint else '?'
         endpoint = f"{endpoint}{separator}token={token}"
 
@@ -80,8 +93,8 @@ def send_notification(
         'Content-Type': 'application/json'
     }
 
-    # Add authorization header if token is available
-    if token:
+    # Add authorization header if token is available and not localhost
+    if token and not is_localhost:
         headers['Authorization'] = f'token {token}'
 
     # Create request
@@ -155,7 +168,7 @@ Examples:
     parser.add_argument(
         "--token",
         default=None,
-        help="Authentication token (auto-detected from JUPYTERHUB_API_TOKEN or JUPYTER_TOKEN env vars if not provided)"
+        help="Authentication token (optional for localhost; auto-detected from JUPYTERHUB_API_TOKEN or JUPYTER_TOKEN env vars if not provided)"
     )
     parser.add_argument(
         "--verbose",
