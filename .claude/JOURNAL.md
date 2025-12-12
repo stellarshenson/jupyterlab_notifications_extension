@@ -57,3 +57,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 18. **Task - Simplify CLI to HTTP-only with auto-detection** (v1.1.24): Remove broken local mode and add server auto-detection<br>
     **Result**: Removed non-functional local mode (separate process can't share memory with JupyterLab). CLI now always uses HTTP API. Added `jupyter server list --json` detection to auto-discover running servers and construct localhost URL. Renamed CLI from `jupyter-notify` to `jupyterlab-notify`. Removed `--use-api` flag (now default). Detection order: running servers via subprocess, then `JUPYTERHUB_SERVICE_PREFIX` env var, then default localhost:8888. Cross-platform (works on Windows). Updated README with simplified documentation.
+
+19. **Task - Format and publish release** (v1.1.25): Run prettier formatting and publish new release<br>
+    **Result**: Ran `jlpm prettier --write .` fixing YAML formatting in GitHub workflow files (build.yml, check-release.yml, prep-release.yml, publish-release.yml, update-integration-tests.yml). Published v1.1.25 to npm and PyPI via `make publish`.
