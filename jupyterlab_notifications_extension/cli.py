@@ -243,7 +243,7 @@ Examples:
     )
     parser.add_argument(
         "--message", "-m",
-        required=True,
+        default=None,
         help="Notification message (required)"
     )
     parser.add_argument(
@@ -287,6 +287,11 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    # Show help if no message provided
+    if args.message is None:
+        parser.print_help()
+        return 0
 
     auto_close = False if args.no_auto_close else args.auto_close
 

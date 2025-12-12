@@ -154,10 +154,12 @@ jupyter-notify -m "Background task finished" --auto-close 0
 ```
 
 **Modes**:
+
 - **Local** (default): Adds notifications directly to the in-memory store. Works when running in the same Python environment as JupyterLab (e.g., from a notebook terminal)
 - **API** (`--use-api` or `--url`): Sends via HTTP. Use for remote servers or when running outside JupyterLab's process
 
 **Environment variables** (for API mode URL auto-detection):
+
 - `JUPYTER_SERVER_URL` - explicit server URL
 - `JUPYTERHUB_SERVICE_PREFIX` - JupyterHub user path (e.g., `/jupyterhub/user/alice`)
 - `JUPYTER_PORT` - server port (default: 8888)
