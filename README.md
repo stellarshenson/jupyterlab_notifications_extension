@@ -130,39 +130,25 @@ await app.commands.execute('jupyterlab-notifications:send', {
 
 ### CLI Tool
 
-The `jupyter-notify` command is installed with the extension:
+The `jupyterlab-notify` command is installed with the extension:
 
 ```bash
-# Local mode (default) - adds directly to notification store
-jupyter-notify -m "Deployment complete" -t success
-# Output: Mode: Local | Type: success
-#         Notification queued: notif_1765552888047_0
-
-# API mode - auto-detects URL from environment
-jupyter-notify --use-api -m "Build finished"
-# Output: Mode: API | URL: http://127.0.0.1:8888/jupyterhub/user/alice | Type: info
+# Basic notification (auto-detects URL from running servers)
+jupyterlab-notify -m "Deployment complete" -t success
+# Output: URL: http://127.0.0.1:8888/jupyterhub/user/alice | Type: success
 #         Notification sent: notif_1765552893662_0
 
-# API mode with explicit URL (--url implies --use-api)
-jupyter-notify --url "http://127.0.0.1:8888/jupyterhub/user/alice" -m "Hello"
+# With explicit URL (e.g., JupyterHub)
+jupyterlab-notify --url "http://127.0.0.1:8888/jupyterhub/user/alice" -m "Hello"
 
 # Persistent warning (no auto-close)
-jupyter-notify -m "System maintenance in 1 hour" -t warning --no-auto-close
+jupyterlab-notify -m "System maintenance in 1 hour" -t warning --no-auto-close
 
 # Silent mode (notification center only, no toast)
-jupyter-notify -m "Background task finished" --auto-close 0
+jupyterlab-notify -m "Background task finished" --auto-close 0
 ```
 
-**Modes**:
-
-- **Local** (default): Adds notifications directly to the in-memory store. Works when running in the same Python environment as JupyterLab (e.g., from a notebook terminal)
-- **API** (`--use-api` or `--url`): Sends via HTTP. Use for remote servers or when running outside JupyterLab's process
-
-**Environment variables** (for API mode URL auto-detection):
-
-- `JUPYTER_SERVER_URL` - explicit server URL
-- `JUPYTERHUB_SERVICE_PREFIX` - JupyterHub user path (e.g., `/jupyterhub/user/alice`)
-- `JUPYTER_PORT` - server port (default: 8888)
+**URL auto-detection**: Queries `jupyter server list --json` to find running servers and constructs localhost URL. Falls back to `JUPYTERHUB_SERVICE_PREFIX` environment variable or `localhost:8888`.
 
 ### cURL
 

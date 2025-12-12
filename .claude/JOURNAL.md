@@ -54,3 +54,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 17. **Task - Improve CLI usability** (v1.1.23): Show help instead of error when no arguments provided<br>
     **Result**: Changed `--message` argument from required to optional with default None. Added check after argument parsing to print help and exit cleanly when no message provided. Fixed Prettier formatting issues in README (added blank lines after bold headings). CLI now shows full usage instructions when run without arguments instead of argparse error.
+
+18. **Task - Simplify CLI to HTTP-only with auto-detection** (v1.1.24): Remove broken local mode and add server auto-detection<br>
+    **Result**: Removed non-functional local mode (separate process can't share memory with JupyterLab). CLI now always uses HTTP API. Added `jupyter server list --json` detection to auto-discover running servers and construct localhost URL. Renamed CLI from `jupyter-notify` to `jupyterlab-notify`. Removed `--use-api` flag (now default). Detection order: running servers via subprocess, then `JUPYTERHUB_SERVICE_PREFIX` env var, then default localhost:8888. Cross-platform (works on Windows). Updated README with simplified documentation.
