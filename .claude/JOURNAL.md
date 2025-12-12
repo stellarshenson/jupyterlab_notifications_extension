@@ -51,3 +51,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 16. **Task - Add dual-mode CLI with auto-detection** (v1.1.22): Implement local and API modes with environment-based URL detection<br>
     **Result**: Refactored CLI to support two modes: Local (default) adds notifications directly to in-memory `_notification_store`, API mode sends via HTTP. Added `--use-api` flag and `get_jupyter_base_url()` function that auto-detects URL from `JUPYTER_SERVER_URL`, `JUPYTERHUB_SERVICE_PREFIX`, or defaults to localhost. Specifying `--url` implicitly enables API mode. CLI now prints execution settings (mode, URL, type) before sending. Updated README documentation with mode explanations.
+
+17. **Task - Improve CLI usability** (v1.1.23): Show help instead of error when no arguments provided<br>
+    **Result**: Changed `--message` argument from required to optional with default None. Added check after argument parsing to print help and exit cleanly when no message provided. Fixed Prettier formatting issues in README (added blank lines after bold headings). CLI now shows full usage instructions when run without arguments instead of argparse error.
