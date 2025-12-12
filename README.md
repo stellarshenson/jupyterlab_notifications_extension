@@ -146,26 +146,21 @@ The included script auto-detects tokens from `JUPYTERHUB_API_TOKEN`, `JPY_API_TO
 ### cURL
 
 ```bash
-# Basic info notification
+# Localhost - no authentication required
 curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
   -H "Content-Type: application/json" \
-  -H "Authorization: token YOUR_TOKEN" \
-  -d '{"message": "Build completed", "type": "info"}'
+  -d '{"message": "Build completed", "type": "success"}'
 
-# Error notification with action button
+# Localhost - warning that stays until dismissed
 curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
   -H "Content-Type: application/json" \
-  -H "Authorization: token YOUR_TOKEN" \
-  -d '{
-    "message": "Build failed on main branch",
-    "type": "error",
-    "autoClose": false,
-    "actions": [{
-      "label": "View Logs",
-      "caption": "Open build logs",
-      "displayType": "accent"
-    }]
-  }'
+  -d '{"message": "System maintenance in 1 hour", "type": "warning", "autoClose": false}'
+
+# Remote - requires authentication token
+curl -X POST http://jupyterhub.example.com/user/alice/jupyterlab-notifications-extension/ingest \
+  -H "Content-Type: application/json" \
+  -H "Authorization: token YOUR_JUPYTER_TOKEN" \
+  -d '{"message": "Deployment complete", "type": "info"}'
 ```
 
 ## Architecture
