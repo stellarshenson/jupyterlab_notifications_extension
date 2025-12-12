@@ -26,6 +26,9 @@ dependencies = [
 ]
 dynamic = ["version", "description", "authors", "urls", "keywords"]
 
+[project.scripts]
+jupyter-notify = "jupyterlab_notifications_extension.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "jupyterlab>=4",

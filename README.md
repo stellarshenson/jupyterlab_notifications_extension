@@ -128,20 +128,28 @@ await app.commands.execute('jupyterlab-notifications:send', {
 });
 ```
 
-### Python Script
+### CLI Tool
 
-The included script auto-detects tokens from `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN`, or `JUPYTER_TOKEN` environment variables:
+The `jupyter-notify` command is installed with the extension:
 
 ```bash
-# Basic notification
-./scripts/send_notification.py --message "Deployment complete" --type success
+# Basic notification (localhost, no auth needed)
+jupyter-notify -m "Deployment complete" -t success
 
 # Persistent warning (no auto-close)
-./scripts/send_notification.py --message "System maintenance in 1 hour" --type warning --no-auto-close
+jupyter-notify -m "System maintenance in 1 hour" -t warning --no-auto-close
 
-# Silent mode (notification center only)
-./scripts/send_notification.py --message "Background task finished" --auto-close 0
+# JupyterHub with base path
+jupyter-notify --url "http://127.0.0.1:8888/jupyterhub/user/alice" -m "Hello"
+
+# Silent mode (notification center only, no toast)
+jupyter-notify -m "Background task finished" --auto-close 0
+
+# With dismiss button
+jupyter-notify -m "Action required" -t warning --no-auto-close --action "Dismiss"
 ```
+
+Auto-detects tokens from `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN`, or `JUPYTER_TOKEN` for remote servers.
 
 ### cURL
 
