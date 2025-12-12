@@ -133,23 +133,23 @@ await app.commands.execute('jupyterlab-notifications:send', {
 The `jupyter-notify` command is installed with the extension:
 
 ```bash
-# Basic notification (localhost, no auth needed)
+# Local mode (default) - adds directly to notification store
 jupyter-notify -m "Deployment complete" -t success
+
+# API mode - auto-detects URL from JUPYTERHUB_SERVICE_PREFIX or JUPYTER_SERVER_URL
+jupyter-notify --use-api -m "Build finished"
+
+# API mode with explicit URL (--url implies --use-api)
+jupyter-notify --url "http://127.0.0.1:8888/jupyterhub/user/alice" -m "Hello"
 
 # Persistent warning (no auto-close)
 jupyter-notify -m "System maintenance in 1 hour" -t warning --no-auto-close
 
-# JupyterHub with base path
-jupyter-notify --url "http://127.0.0.1:8888/jupyterhub/user/alice" -m "Hello"
-
 # Silent mode (notification center only, no toast)
 jupyter-notify -m "Background task finished" --auto-close 0
-
-# With dismiss button
-jupyter-notify -m "Action required" -t warning --no-auto-close --action "Dismiss"
 ```
 
-Auto-detects tokens from `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN`, or `JUPYTER_TOKEN` for remote servers.
+**Modes**: Local mode adds notifications directly to the in-memory store (same Python environment). API mode sends via HTTP - use for remote servers or when running outside JupyterLab's process.
 
 ### cURL
 

@@ -2,32 +2,98 @@
 """
 CLI tool to send notifications to JupyterLab via the notification extension.
 
-Localhost requests do not require authentication tokens.
-Remote requests require token via --token argument or environment variables.
+Two modes of operation:
+- Local (default): Adds notification directly to the in-memory store
+- API (--use-api): Sends via HTTP API to a running JupyterLab server
 
 Usage:
-    # Default (localhost on port 8888)
-    jupyter-notify --message "Your message here"
+    # Local mode (default) - adds directly to notification store
+    jupyter-notify -m "Your message here"
 
-    # With custom type
-    jupyter-notify --message "Your message here" --type warning
+    # API mode - sends via HTTP to JupyterLab server
+    jupyter-notify --use-api -m "Your message here"
 
-    # JupyterHub environment (use 127.0.0.1 with full path)
-    jupyter-notify --url "http://127.0.0.1:8888/jupyterhub/user/konrad" --message "Test"
+    # API mode with JupyterHub base path
+    jupyter-notify --use-api --url "http://127.0.0.1:8888/jupyterhub/user/konrad" -m "Test"
 
-    # Remote server (requires token)
-    jupyter-notify --url "http://remote-server:8888" --message "Test" --token "your-token"
+    # API mode to remote server (requires token)
+    jupyter-notify --use-api --url "http://remote-server:8888" -m "Test" --token "your-token"
 """
 
 import argparse
 import json
 import os
+import time
 import urllib.request
 import urllib.error
 
 
-def send_notification(
-    base_url: str = "http://localhost:8888",
+def send_notification_local(
+    message: str,
+    notification_type: str = "info",
+    auto_close: int = 5000,
+    actions: list = None,
+    data: dict = None,
+    verbose: bool = False
+):
+    """
+    Send a notification by adding directly to the in-memory store.
+
+    This works when the notification extension is installed in the same
+    Python environment. The notification will be picked up by JupyterLab
+    on the next poll cycle.
+    """
+    from jupyterlab_notifications_extension.routes import _notification_store
+
+    notification = {
+        "id": f"notif_{int(time.time() * 1000)}_{len(_notification_store)}",
+        "message": message,
+        "type": notification_type,
+        "autoClose": auto_close,
+        "createdAt": int(time.time() * 1000),
+        "actions": actions or [],
+        "data": data
+    }
+
+    if verbose:
+        print("Adding notification directly to store:")
+        print(json.dumps(notification, indent=2))
+        print()
+
+    _notification_store.append(notification)
+    print(f"Notification queued: {notification['id']}")
+    return {"success": True, "notification_id": notification["id"]}
+
+
+def get_jupyter_base_url():
+    """
+    Auto-detect JupyterLab base URL from environment.
+
+    Checks in order:
+    1. JUPYTER_SERVER_URL - explicit server URL
+    2. JUPYTERHUB_SERVICE_PREFIX with JUPYTERHUB_API_URL - JupyterHub environment
+    3. Default: http://localhost:8888
+    """
+    # Check for explicit server URL
+    server_url = os.environ.get('JUPYTER_SERVER_URL')
+    if server_url:
+        return server_url.rstrip('/')
+
+    # Check for JupyterHub environment
+    service_prefix = os.environ.get('JUPYTERHUB_SERVICE_PREFIX')
+    if service_prefix:
+        # In JupyterHub, construct URL from service prefix
+        # Default to localhost since we're running locally
+        port = os.environ.get('JUPYTER_PORT', '8888')
+        return f"http://127.0.0.1:{port}{service_prefix.rstrip('/')}"
+
+    # Default
+    port = os.environ.get('JUPYTER_PORT', '8888')
+    return f"http://localhost:{port}"
+
+
+def send_notification_api(
+    base_url: str = None,
     message: str = "Hello from notification script!",
     notification_type: str = "info",
     auto_close: int = 5000,
@@ -37,10 +103,10 @@ def send_notification(
     verbose: bool = False
 ):
     """
-    Send a notification to the JupyterLab notification extension.
+    Send a notification via HTTP API to a JupyterLab server.
 
     Args:
-        base_url: Base URL of the JupyterLab server (default: http://localhost:8888)
+        base_url: Base URL of the JupyterLab server (auto-detected if not provided)
         message: Notification message text
         notification_type: Type of notification (default, info, success, warning, error, in-progress)
         auto_close: Auto-close timeout in milliseconds, or False to disable
@@ -49,6 +115,12 @@ def send_notification(
         token: Authentication token (optional for localhost)
         verbose: Print debug information
     """
+    # Auto-detect base URL if not provided
+    if base_url is None:
+        base_url = get_jupyter_base_url()
+
+    if verbose:
+        print(f"Using base URL: {base_url}")
 
     # Check if target is localhost
     is_localhost = (
@@ -142,24 +214,32 @@ def main():
         description="Send notifications to JupyterLab",
         epilog="""
 Examples:
-  # Send a basic info notification
-  %(prog)s --message "Hello World"
+  # Local mode (default) - adds directly to notification store
+  %(prog)s -m "Hello World"
 
-  # Send a warning that stays until dismissed
-  %(prog)s --message "Maintenance in 1 hour" --type warning --no-auto-close
+  # API mode - sends via HTTP to JupyterLab server
+  %(prog)s --use-api -m "Hello World"
 
-  # JupyterHub with base path
-  %(prog)s --url "http://127.0.0.1:8888/jupyterhub/user/alice" --message "Hello"
+  # API mode with JupyterHub base path
+  %(prog)s --use-api --url "http://127.0.0.1:8888/jupyterhub/user/alice" -m "Hello"
+
+  # Warning that stays until dismissed
+  %(prog)s -m "Maintenance in 1 hour" -t warning --no-auto-close
 
   # Silent notification (notification center only)
-  %(prog)s --message "Background task done" --auto-close 0
+  %(prog)s -m "Background task done" --auto-close 0
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
+        "--use-api",
+        action="store_true",
+        help="Use HTTP API instead of direct local access (required for remote servers)"
+    )
+    parser.add_argument(
         "--url",
-        default="http://localhost:8888",
-        help="JupyterLab base URL (default: http://localhost:8888)"
+        default=None,
+        help="JupyterLab base URL for API mode (auto-detected from JUPYTER_SERVER_URL, JUPYTERHUB_SERVICE_PREFIX, or defaults to localhost:8888)"
     )
     parser.add_argument(
         "--message", "-m",
@@ -186,7 +266,7 @@ Examples:
     parser.add_argument(
         "--token",
         default=None,
-        help="Auth token (auto-detected from JUPYTERHUB_API_TOKEN, JPY_API_TOKEN, or JUPYTER_TOKEN)"
+        help="Auth token for API mode (auto-detected from JUPYTERHUB_API_TOKEN, JPY_API_TOKEN, or JUPYTER_TOKEN)"
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -228,17 +308,40 @@ Examples:
             "displayType": "default"
         }]
 
+    # If URL is specified, use API mode
+    use_api = args.use_api or args.url is not None
+
+    # Print execution settings
+    mode = "API" if use_api else "Local"
+    if use_api:
+        url = args.url if args.url else get_jupyter_base_url()
+        print(f"Mode: {mode} | URL: {url} | Type: {args.type}")
+    else:
+        print(f"Mode: {mode} | Type: {args.type}")
+
     try:
-        send_notification(
-            base_url=args.url,
-            message=args.message,
-            notification_type=args.type,
-            auto_close=auto_close,
-            actions=actions,
-            data=data_dict,
-            token=args.token,
-            verbose=args.verbose
-        )
+        if use_api:
+            # API mode - send via HTTP
+            send_notification_api(
+                base_url=args.url,
+                message=args.message,
+                notification_type=args.type,
+                auto_close=auto_close,
+                actions=actions,
+                data=data_dict,
+                token=args.token,
+                verbose=args.verbose
+            )
+        else:
+            # Local mode - add directly to store
+            send_notification_local(
+                message=args.message,
+                notification_type=args.type,
+                auto_close=auto_close,
+                actions=actions,
+                data=data_dict,
+                verbose=args.verbose
+            )
         return 0
     except Exception:
         return 1

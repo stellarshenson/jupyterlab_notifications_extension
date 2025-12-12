@@ -48,3 +48,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 15. **Task - Add jupyter-notify CLI tool** (v1.1.21): Create installable command-line tool for sending notifications<br>
     **Result**: Created `jupyterlab_notifications_extension/cli.py` with `send_notification()` function and argparse-based CLI. Added `[project.scripts]` entry in pyproject.toml exposing `jupyter-notify` command. Supports short flags (`-m` for message, `-t` for type, `-v` for verbose), JupyterHub base URL paths, auto-close control, dismiss buttons via `--action`, and automatic token detection from environment variables. Updated README with CLI Tool section replacing Python Script section. Tested successfully with JupyterHub URL pattern.
+
+16. **Task - Add dual-mode CLI with auto-detection** (v1.1.22): Implement local and API modes with environment-based URL detection<br>
+    **Result**: Refactored CLI to support two modes: Local (default) adds notifications directly to in-memory `_notification_store`, API mode sends via HTTP. Added `--use-api` flag and `get_jupyter_base_url()` function that auto-detects URL from `JUPYTER_SERVER_URL`, `JUPYTERHUB_SERVICE_PREFIX`, or defaults to localhost. Specifying `--url` implicitly enables API mode. CLI now prints execution settings (mode, URL, type) before sending. Updated README documentation with mode explanations.
