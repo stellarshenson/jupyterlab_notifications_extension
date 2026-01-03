@@ -63,3 +63,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 20. **Task - Add command execution to action buttons** (v1.1.27): Enable action buttons to execute JupyterLab commands<br>
     **Result**: Fixed "Command 'undefined' not registered" error by switching from `app.commands.execute('apputils:notify')` to `Notification.manager.notify()` which supports custom callbacks. Extended action schema with optional `commandId` and `args` fields - if `commandId` provided, button executes that JupyterLab command before dismissing. Added `--command` and `--command-args` flags to CLI for triggering commands like `filebrowser:open-path`. Updated README with examples for both API and CLI usage. All 6 Python tests pass.
+
+21. **Task - Fix jupyter-releaser CI/CD** (v1.2.0): Skip build-changelog for direct commit workflow<br>
+    **Result**: Fixed "No activity found" error in prep-release workflow caused by direct commits without PRs. Added `steps_to_skip: "build-changelog"` and `RH_SINCE_LAST_STABLE: 'true'` environment variable to both `check-release.yml` and `prep-release.yml` workflows. Bumped version to 1.2.0 for command execution feature. CHANGELOG.md must be manually maintained going forward.
