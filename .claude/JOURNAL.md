@@ -66,3 +66,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 21. **Task - Fix jupyter-releaser CI/CD** (v1.2.2): Skip build-changelog for direct commit workflow<br>
     **Result**: Fixed "No activity found" error in prep-release workflow caused by direct commits without PRs. Added `steps_to_skip: "build-changelog"` and `RH_SINCE_LAST_STABLE: 'true'` environment variable to both `check-release.yml` and `prep-release.yml` workflows. Published v1.2.2 to npm and PyPI with command execution feature and CI/CD fix. CHANGELOG.md must be manually maintained going forward.
+
+22. **Task - Update command example** (v1.2.2): Replace filebrowser example with iframe:open<br>
+    **Result**: Updated CLI help text and README examples to use `iframe:open` command with `local:///welcome.html` path instead of `filebrowser:open-path`. More practical example for opening help pages via notification action buttons.

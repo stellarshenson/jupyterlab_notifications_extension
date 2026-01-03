@@ -197,7 +197,7 @@ Examples:
   %(prog)s -m "Task complete" --action "Dismiss"
 
   # Action button that executes a JupyterLab command
-  %(prog)s -m "New file available" --action "Open File" --cmd "filebrowser:open-path" --command-args '{"path": "/notebooks/example.ipynb"}'
+  %(prog)s -m "Help Available!" --action "Open Help" --cmd "iframe:open" --command-args '{"path": "local:///welcome.html"}'
 
   # Silent notification (notification center only)
   %(prog)s -m "Background task done" --auto-close 0

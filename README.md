@@ -131,14 +131,14 @@ await app.commands.execute('jupyterlab-notifications:send', {
 
 // Action button that executes a JupyterLab command
 await app.commands.execute('jupyterlab-notifications:send', {
-  message: 'New notebook available',
+  message: 'Help Available!',
   type: 'info',
   autoClose: false,
   actions: [
     {
-      label: 'Open Notebook',
-      commandId: 'filebrowser:open-path',
-      args: { path: '/notebooks/example.ipynb' },
+      label: 'Open Help',
+      commandId: 'iframe:open',
+      args: { path: 'local:///welcome.html' },
       displayType: 'accent'
     }
   ]
@@ -163,8 +163,8 @@ jupyterlab-notify -m "System maintenance in 1 hour" -t warning --no-auto-close
 jupyterlab-notify -m "Task complete" --action "Dismiss"
 
 # Action button that executes a JupyterLab command
-jupyterlab-notify -m "New file available" --action "Open File" \
-  --cmd "filebrowser:open-path" --command-args '{"path": "/notebooks/example.ipynb"}'
+jupyterlab-notify -m "Help Available!" --action "Open Help" \
+  --cmd "iframe:open" --command-args '{"path": "local:///welcome.html"}'
 
 # Silent mode (notification center only, no toast)
 jupyterlab-notify -m "Background task finished" --auto-close 0
