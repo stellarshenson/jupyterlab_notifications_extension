@@ -60,3 +60,6 @@ This journal tracks substantive work on documents, diagrams, and documentation c
 
 19. **Task - Format and publish release** (v1.1.25): Run prettier formatting and publish new release<br>
     **Result**: Ran `jlpm prettier --write .` fixing YAML formatting in GitHub workflow files (build.yml, check-release.yml, prep-release.yml, publish-release.yml, update-integration-tests.yml). Published v1.1.25 to npm and PyPI via `make publish`.
+
+20. **Task - Add command execution to action buttons** (v1.1.27): Enable action buttons to execute JupyterLab commands<br>
+    **Result**: Fixed "Command 'undefined' not registered" error by switching from `app.commands.execute('apputils:notify')` to `Notification.manager.notify()` which supports custom callbacks. Extended action schema with optional `commandId` and `args` fields - if `commandId` provided, button executes that JupyterLab command before dismissing. Added `--command` and `--command-args` flags to CLI for triggering commands like `filebrowser:open-path`. Updated README with examples for both API and CLI usage. All 6 Python tests pass.
