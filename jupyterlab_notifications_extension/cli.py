@@ -193,6 +193,12 @@ Examples:
   # Warning that stays until dismissed
   %(prog)s -m "Maintenance in 1 hour" -t warning --no-auto-close
 
+  # Dismiss button
+  %(prog)s -m "Task complete" --action "Dismiss"
+
+  # Action button that executes a JupyterLab command
+  %(prog)s -m "New file available" --action "Open File" --cmd "filebrowser:open-path" --command-args '{"path": "/notebooks/example.ipynb"}'
+
   # Silent notification (notification center only)
   %(prog)s -m "Background task done" --auto-close 0
         """,
@@ -245,7 +251,20 @@ Examples:
         "--action",
         type=str,
         default=None,
-        help="Add dismiss button with custom label"
+        help="Add button with custom label (dismiss-only unless --command specified)"
+    )
+    parser.add_argument(
+        "--command", "--cmd",
+        type=str,
+        default=None,
+        dest="command",
+        help="JupyterLab command ID to execute when action button clicked"
+    )
+    parser.add_argument(
+        "--command-args",
+        type=str,
+        default=None,
+        help="JSON args for command (e.g., '{\"path\": \"/notebooks\"}')"
     )
 
     args = parser.parse_args()
@@ -266,14 +285,30 @@ Examples:
             print(f"Error parsing --data JSON: {e}")
             return 1
 
+    # Parse command args JSON if provided
+    command_args = None
+    if args.command_args:
+        try:
+            command_args = json.loads(args.command_args)
+        except json.JSONDecodeError as e:
+            print(f"Error parsing --command-args JSON: {e}")
+            return 1
+
     # Build actions if requested
     actions = None
-    if args.action:
-        actions = [{
-            "label": args.action,
-            "caption": "Close this notification",
+    if args.action or args.command:
+        action_obj = {
+            "label": args.action or "Action",
             "displayType": "default"
-        }]
+        }
+        if args.command:
+            action_obj["commandId"] = args.command
+            action_obj["caption"] = f"Execute: {args.command}"
+            if command_args:
+                action_obj["args"] = command_args
+        else:
+            action_obj["caption"] = "Close this notification"
+        actions = [action_obj]
 
     # Get URL (auto-detect if not specified)
     url = args.url if args.url else get_jupyter_base_url()

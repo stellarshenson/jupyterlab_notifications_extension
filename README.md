@@ -29,7 +29,7 @@ Interactive dialog with message input, type selection, auto-close timing, and ac
 - Programmatic command API for extensions and automation
 - Five notification types (info, success, warning, error, in-progress)
 - Configurable auto-close with millisecond precision or manual dismiss
-- Optional action buttons (currently dismiss only)
+- Action buttons with optional JupyterLab command execution
 - Broadcast delivery via 30-second polling
 - In-memory queue cleared after delivery
 
@@ -77,13 +77,15 @@ Send notifications to JupyterLab. Requires authentication via `Authorization: to
 
 **Action Button Schema**:
 
-| Field         | Type   | Required | Default     | Description                                       |
-| ------------- | ------ | -------- | ----------- | ------------------------------------------------- |
-| `label`       | string | Yes      | -           | Button text                                       |
-| `caption`     | string | No       | `""`        | Tooltip text                                      |
-| `displayType` | string | No       | `"default"` | Visual style: `default`, `accent`, `warn`, `link` |
+| Field         | Type   | Required | Default     | Description                                                      |
+| ------------- | ------ | -------- | ----------- | ---------------------------------------------------------------- |
+| `label`       | string | Yes      | -           | Button text                                                      |
+| `caption`     | string | No       | `""`        | Tooltip text                                                     |
+| `displayType` | string | No       | `"default"` | Visual style: `default`, `accent`, `warn`, `link`                |
+| `commandId`   | string | No       | -           | JupyterLab command ID to execute (e.g., `filebrowser:open-path`) |
+| `args`        | object | No       | `{}`        | Arguments passed to the command                                  |
 
-Note: Action buttons are purely visual. Clicking any button dismisses the notification using JupyterLab's native behavior. Buttons do not trigger custom callbacks or actions.
+Note: Clicking any button dismisses the notification. If `commandId` is provided, the specified JupyterLab command executes before dismissal.
 
 **Response** (200 OK):
 
@@ -119,12 +121,27 @@ await app.commands.execute('jupyterlab-notifications:send', {
   autoClose: 3000
 });
 
-// With action button
+// With dismiss button
 await app.commands.execute('jupyterlab-notifications:send', {
   message: 'Error processing data',
   type: 'error',
   autoClose: false,
-  actions: [{ label: 'View Details', displayType: 'accent' }]
+  actions: [{ label: 'Dismiss', displayType: 'default' }]
+});
+
+// Action button that executes a JupyterLab command
+await app.commands.execute('jupyterlab-notifications:send', {
+  message: 'New notebook available',
+  type: 'info',
+  autoClose: false,
+  actions: [
+    {
+      label: 'Open Notebook',
+      commandId: 'filebrowser:open-path',
+      args: { path: '/notebooks/example.ipynb' },
+      displayType: 'accent'
+    }
+  ]
 });
 ```
 
@@ -135,14 +152,19 @@ The `jupyterlab-notify` command is installed with the extension:
 ```bash
 # Basic notification (auto-detects URL from running servers)
 jupyterlab-notify -m "Deployment complete" -t success
-# Output: URL: http://127.0.0.1:8888/jupyterhub/user/alice | Type: success
-#         Notification sent: notif_1765552893662_0
 
 # With explicit URL (e.g., JupyterHub)
 jupyterlab-notify --url "http://127.0.0.1:8888/jupyterhub/user/alice" -m "Hello"
 
 # Persistent warning (no auto-close)
 jupyterlab-notify -m "System maintenance in 1 hour" -t warning --no-auto-close
+
+# With dismiss button
+jupyterlab-notify -m "Task complete" --action "Dismiss"
+
+# Action button that executes a JupyterLab command
+jupyterlab-notify -m "New file available" --action "Open File" \
+  --cmd "filebrowser:open-path" --command-args '{"path": "/notebooks/example.ipynb"}'
 
 # Silent mode (notification center only, no toast)
 jupyterlab-notify -m "Background task finished" --auto-close 0

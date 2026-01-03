@@ -3,10 +3,25 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
-import { ICommandPalette, Dialog } from '@jupyterlab/apputils';
+import { ICommandPalette, Dialog, Notification } from '@jupyterlab/apputils';
 import { Widget } from '@lumino/widgets';
+import {
+  ReadonlyJSONValue,
+  ReadonlyPartialJSONObject
+} from '@lumino/coreutils';
 
 import { requestAPI } from './request';
+
+/**
+ * Action interface for notifications
+ */
+interface INotificationAction {
+  label: string;
+  caption?: string;
+  displayType?: 'default' | 'accent' | 'warn' | 'link';
+  commandId?: string;
+  args?: ReadonlyPartialJSONObject;
+}
 
 /**
  * Notification interface matching backend payload
@@ -17,12 +32,8 @@ interface INotificationData {
   type: 'default' | 'info' | 'success' | 'warning' | 'error' | 'in-progress';
   autoClose: number | false;
   createdAt: number;
-  actions?: Array<{
-    label: string;
-    caption?: string;
-    displayType?: 'default' | 'accent' | 'warn' | 'link';
-  }>;
-  data?: any;
+  actions?: INotificationAction[];
+  data?: ReadonlyJSONValue;
 }
 
 /**
@@ -47,8 +58,8 @@ async function fetchAndDisplayNotifications(
       );
 
       response.notifications.forEach(notif => {
-        // Build options object
-        const options: any = {
+        // Build options object with explicit type
+        const options: Notification.IOptions<ReadonlyJSONValue> = {
           autoClose: notif.autoClose
         };
 
@@ -57,28 +68,31 @@ async function fetchAndDisplayNotifications(
           options.data = notif.data;
         }
 
-        // Build actions array if present (actions are passed as part of options)
+        // Build actions array if present
         if (notif.actions && notif.actions.length > 0) {
           options.actions = notif.actions.map(action => ({
             label: action.label,
             caption: action.caption || '',
             displayType: action.displayType || 'default',
             callback: () => {
-              console.log(`Action clicked: ${action.label}`);
+              // If commandId provided, execute the command
+              if (action.commandId) {
+                app.commands
+                  .execute(action.commandId, action.args)
+                  .catch(err => {
+                    console.error(
+                      `Failed to execute command '${action.commandId}':`,
+                      err
+                    );
+                  });
+              }
+              // Default: button click dismisses notification (built-in behavior)
             }
           }));
         }
 
-        // Display notification using JupyterLab's command
-        app.commands
-          .execute('apputils:notify', {
-            message: notif.message,
-            type: notif.type,
-            options: options
-          })
-          .catch(err => {
-            console.error('Failed to display notification:', err);
-          });
+        // Display notification using Notification manager directly
+        Notification.manager.notify(notif.message, notif.type, options);
       });
     }
   } catch (reason) {
