@@ -1,6 +1,6 @@
 {
     "name": "jupyterlab_notifications_extension",
-    "version": "1.1.27",
+    "version": "1.2.1",
     "description": "Jupyterlab extension to receive and display notifications in the main panel. Those can be from the jupyterjub administrator or from other places.",
     "keywords": [
         "jupyter",
