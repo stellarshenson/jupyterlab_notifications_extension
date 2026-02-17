@@ -177,6 +177,9 @@ function injectTimeAgoIntoCenter(center: Element): void {
 /**
  * Set up a MutationObserver to watch for the Notification Center
  * opening and inject time-ago indicators into its list items.
+ *
+ * Uses subtree observation to catch both the center being added
+ * and its list items being populated after the initial render.
  */
 function observeNotificationCenter(): void {
   const observer = new MutationObserver(mutations => {
@@ -186,14 +189,19 @@ function observeNotificationCenter(): void {
         if (!(node instanceof HTMLElement)) {
           continue;
         }
-        // Check if the added node is the notification center
-        if (node.classList.contains('jp-Notification-Center')) {
-          injectTimeAgoIntoCenter(node);
+        // Check if the added node is or contains a notification center
+        const center =
+          node.classList.contains('jp-Notification-Center')
+            ? node
+            : node.querySelector('.jp-Notification-Center');
+        if (center) {
+          setTimeout(() => injectTimeAgoIntoCenter(center), 100);
+          continue;
         }
-        // Or if it contains the notification center
-        const nested = node.querySelector('.jp-Notification-Center');
-        if (nested) {
-          injectTimeAgoIntoCenter(nested);
+        // Also catch list items added inside an existing center
+        const existingCenter = node.closest('.jp-Notification-Center');
+        if (existingCenter) {
+          setTimeout(() => injectTimeAgoIntoCenter(existingCenter), 100);
         }
       }
     }
