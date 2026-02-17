@@ -68,9 +68,7 @@ function injectTimeAgo(
   notifId: string
 ): void {
   setTimeout(() => {
-    const toasts = Array.from(
-      document.querySelectorAll('.jp-toast-message')
-    );
+    const toasts = Array.from(document.querySelectorAll('.jp-toast-message'));
     let target: Element | null = null;
     for (const el of toasts) {
       if (
@@ -210,10 +208,9 @@ function observeNotificationCenter(): void {
           continue;
         }
         // Check if the added node is or contains a notification center
-        const center =
-          node.classList.contains('jp-Notification-Center')
-            ? node
-            : node.querySelector('.jp-Notification-Center');
+        const center = node.classList.contains('jp-Notification-Center')
+          ? node
+          : node.querySelector('.jp-Notification-Center');
         if (center) {
           setTimeout(() => injectTimeAgoIntoCenter(center), 100);
           continue;
