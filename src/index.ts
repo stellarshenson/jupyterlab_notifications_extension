@@ -11,6 +11,7 @@ import {
 } from '@lumino/coreutils';
 
 import { requestAPI } from './request';
+import { formatTimeAgo } from './utils';
 
 /**
  * Action interface for notifications
@@ -40,6 +41,165 @@ interface INotificationData {
  * Poll interval in milliseconds (30 seconds)
  */
 const POLL_INTERVAL = 30000;
+
+/**
+ * Create and return a styled time-ago DOM element.
+ */
+function createTimeAgoElement(createdAt: number): HTMLDivElement {
+  const el = document.createElement('div');
+  el.className = 'jp-toast-time-ago';
+  el.textContent = formatTimeAgo(createdAt);
+  el.style.fontSize = '0.75em';
+  el.style.color = 'var(--jp-ui-font-color2, #888)';
+  el.style.marginTop = '4px';
+  return el;
+}
+
+/**
+ * Inject a time-ago indicator into a toast popup after notify().
+ *
+ * Finds the toast by matching message text inside .jp-toast-message,
+ * appends a styled element, and refreshes it every 10 seconds.
+ * The interval self-clears when the notification is dismissed.
+ */
+function injectTimeAgo(
+  message: string,
+  createdAt: number,
+  notifId: string
+): void {
+  setTimeout(() => {
+    const toasts = Array.from(
+      document.querySelectorAll('.jp-toast-message')
+    );
+    let target: Element | null = null;
+    for (const el of toasts) {
+      if (
+        el.textContent === message &&
+        !el.querySelector('.jp-toast-time-ago')
+      ) {
+        target = el;
+        break;
+      }
+    }
+    if (!target) {
+      return;
+    }
+
+    const timeEl = createTimeAgoElement(createdAt);
+    target.appendChild(timeEl);
+
+    const refreshInterval = setInterval(() => {
+      if (!Notification.manager.has(notifId)) {
+        clearInterval(refreshInterval);
+        return;
+      }
+      timeEl.textContent = formatTimeAgo(createdAt);
+    }, 10000);
+  }, 100);
+}
+
+/**
+ * Inject time-ago indicators into all notifications visible in the
+ * Notification Center panel. Matches DOM elements to manager entries
+ * by message text to look up createdAt timestamps. Starts a shared
+ * interval that refreshes all visible indicators and stops when the
+ * center is removed from the DOM.
+ */
+function injectTimeAgoIntoCenter(center: Element): void {
+  const items = Array.from(center.querySelectorAll('.jp-toast-message'));
+  const notifications = Notification.manager.notifications;
+
+  // Build a lookup from message text to createdAt, handling duplicates
+  // by consuming matched entries (shift from a per-message list)
+  const lookup = new Map<string, number[]>();
+  for (const n of notifications) {
+    const list = lookup.get(n.message) || [];
+    list.push(n.createdAt);
+    lookup.set(n.message, list);
+  }
+
+  const injected: HTMLDivElement[] = [];
+
+  for (const el of items) {
+    if (el.querySelector('.jp-toast-time-ago')) {
+      continue;
+    }
+    const msg = el.textContent || '';
+    const timestamps = lookup.get(msg);
+    if (!timestamps || timestamps.length === 0) {
+      continue;
+    }
+    const createdAt = timestamps.shift()!;
+    const timeEl = createTimeAgoElement(createdAt);
+    el.appendChild(timeEl);
+    injected.push(timeEl);
+  }
+
+  if (injected.length === 0) {
+    return;
+  }
+
+  // Refresh all injected elements while the center is open
+  const refreshInterval = setInterval(() => {
+    if (!document.body.contains(center)) {
+      clearInterval(refreshInterval);
+      return;
+    }
+    // Re-read timestamps for accuracy
+    const fresh = Notification.manager.notifications;
+    const freshLookup = new Map<string, number[]>();
+    for (const n of fresh) {
+      const list = freshLookup.get(n.message) || [];
+      list.push(n.createdAt);
+      freshLookup.set(n.message, list);
+    }
+    for (const el of injected) {
+      if (!document.body.contains(el)) {
+        continue;
+      }
+      const parent = el.parentElement;
+      if (!parent) {
+        continue;
+      }
+      // Get the message text excluding the time-ago element itself
+      const msg = Array.from(parent.childNodes)
+        .filter(node => node !== el)
+        .map(node => node.textContent || '')
+        .join('');
+      const ts = freshLookup.get(msg);
+      if (ts && ts.length > 0) {
+        el.textContent = formatTimeAgo(ts.shift()!);
+      }
+    }
+  }, 10000);
+}
+
+/**
+ * Set up a MutationObserver to watch for the Notification Center
+ * opening and inject time-ago indicators into its list items.
+ */
+function observeNotificationCenter(): void {
+  const observer = new MutationObserver(mutations => {
+    for (const mutation of mutations) {
+      for (let i = 0; i < mutation.addedNodes.length; i++) {
+        const node = mutation.addedNodes[i];
+        if (!(node instanceof HTMLElement)) {
+          continue;
+        }
+        // Check if the added node is the notification center
+        if (node.classList.contains('jp-Notification-Center')) {
+          injectTimeAgoIntoCenter(node);
+        }
+        // Or if it contains the notification center
+        const nested = node.querySelector('.jp-Notification-Center');
+        if (nested) {
+          injectTimeAgoIntoCenter(nested);
+        }
+      }
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}
 
 /**
  * Fetch and display notifications from the server
@@ -91,8 +251,15 @@ async function fetchAndDisplayNotifications(
           }));
         }
 
-        // Display notification using Notification manager directly
-        Notification.manager.notify(notif.message, notif.type, options);
+        // Display notification
+        const notifId = Notification.manager.notify(
+          notif.message,
+          notif.type,
+          options
+        );
+
+        // Inject a time-ago element into the toast DOM
+        injectTimeAgo(notif.message, notif.createdAt, notifId);
       });
     }
   } catch (reason) {
@@ -281,6 +448,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     // Add command to palette
     palette.addItem({ command: commandId, category: 'Notifications' });
+
+    // Watch for Notification Center opening to inject time-ago
+    observeNotificationCenter();
 
     // Fetch notifications immediately on startup
     fetchAndDisplayNotifications(app);
