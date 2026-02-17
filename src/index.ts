@@ -86,7 +86,18 @@ function injectTimeAgo(
     }
 
     const timeEl = createTimeAgoElement(createdAt);
-    target.appendChild(timeEl);
+
+    // If a button bar exists, place time-ago inside it (left-aligned)
+    const parent = target.parentElement;
+    const buttonBar = parent
+      ? parent.querySelector('.jp-toast-buttonBar')
+      : null;
+    if (buttonBar) {
+      timeEl.style.marginTop = '0';
+      buttonBar.insertBefore(timeEl, buttonBar.firstChild);
+    } else {
+      target.appendChild(timeEl);
+    }
 
     const refreshInterval = setInterval(() => {
       if (!Notification.manager.has(notifId)) {
@@ -131,7 +142,16 @@ function injectTimeAgoIntoCenter(center: Element): void {
     }
     const createdAt = timestamps.shift()!;
     const timeEl = createTimeAgoElement(createdAt);
-    el.appendChild(timeEl);
+
+    // If a button bar exists, place time-ago inside it (left-aligned)
+    const elParent = el.parentElement;
+    const bar = elParent ? elParent.querySelector('.jp-toast-buttonBar') : null;
+    if (bar) {
+      timeEl.style.marginTop = '0';
+      bar.insertBefore(timeEl, bar.firstChild);
+    } else {
+      el.appendChild(timeEl);
+    }
     injected.push(timeEl);
   }
 

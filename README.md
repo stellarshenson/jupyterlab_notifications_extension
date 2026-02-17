@@ -33,6 +33,7 @@ Interactive dialog with message input, type selection, auto-close timing, and ac
 - Five notification types (info, success, warning, error, in-progress)
 - Configurable auto-close with millisecond precision or manual dismiss
 - Action buttons with optional JupyterLab command execution
+- Dynamic time-ago indicator showing when each notification was generated
 - Broadcast delivery via 30-second polling
 - In-memory queue cleared after delivery
 
@@ -194,6 +195,10 @@ curl -X POST http://jupyterhub.example.com/user/alice/jupyterlab-notifications-e
   -H "Authorization: token YOUR_JUPYTER_TOKEN" \
   -d '{"message": "Deployment complete", "type": "info"}'
 ```
+
+## Time-Ago Indicator
+
+Each notification displays a relative timestamp (e.g., `just now`, `30s ago`, `5m ago`, `2h ago`, `3d ago`) that updates every 10 seconds while the notification remains visible. The indicator appears below the message when no action buttons are present, or inline with the button bar when buttons exist. The notification center panel also shows time-ago for all listed notifications.
 
 ## Architecture
 

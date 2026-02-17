@@ -58,3 +58,71 @@ test('should launch notification dialog from command', async ({ page }) => {
   // Close dialog
   await page.click('button:has-text("Cancel")');
 });
+
+test('should display time-ago indicator on notification', async ({ page }) => {
+  await page.goto();
+
+  // POST a notification via the API
+  const baseUrl = page.url().replace(/\/lab.*$/, '');
+  await page.request.post(
+    `${baseUrl}/jupyterlab-notifications-extension/ingest`,
+    {
+      data: {
+        message: 'Time-ago test notification',
+        type: 'info',
+        autoClose: false
+      }
+    }
+  );
+
+  // Wait for the polling cycle to pick up the notification (max 35s)
+  const toast = page.locator('.jp-toast-message', {
+    hasText: 'Time-ago test notification'
+  });
+  await expect(toast).toBeVisible({ timeout: 35000 });
+
+  // Verify time-ago element was injected
+  const timeAgo = toast.locator('.jp-toast-time-ago');
+  await expect(timeAgo).toBeVisible({ timeout: 2000 });
+
+  // Verify it shows a valid time label
+  const text = await timeAgo.textContent();
+  expect(text).toMatch(/^(just now|\d+[smhd] ago)$/);
+});
+
+test('should place time-ago inline with action buttons', async ({ page }) => {
+  await page.goto();
+
+  // POST a notification with an action button
+  const baseUrl = page.url().replace(/\/lab.*$/, '');
+  await page.request.post(
+    `${baseUrl}/jupyterlab-notifications-extension/ingest`,
+    {
+      data: {
+        message: 'Button time-ago test',
+        type: 'success',
+        autoClose: false,
+        actions: [
+          { label: 'Dismiss', caption: 'Close', displayType: 'default' }
+        ]
+      }
+    }
+  );
+
+  // Wait for the notification toast
+  const toast = page.locator('.Toastify__toast', {
+    hasText: 'Button time-ago test'
+  });
+  await expect(toast).toBeVisible({ timeout: 35000 });
+
+  // Time-ago should be inside the button bar, not inside jp-toast-message
+  const buttonBar = toast.locator('.jp-toast-buttonBar');
+  await expect(buttonBar).toBeVisible();
+
+  const timeAgo = buttonBar.locator('.jp-toast-time-ago');
+  await expect(timeAgo).toBeVisible({ timeout: 2000 });
+
+  // Verify the action button is also present on the same bar
+  const button = buttonBar.locator('.jp-toast-button');
+  await expect(button).toBeVisible();
+});
