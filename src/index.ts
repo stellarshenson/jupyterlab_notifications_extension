@@ -130,7 +130,12 @@ function injectTimeAgoIntoCenter(center: Element): void {
   const injected: HTMLDivElement[] = [];
 
   for (const el of items) {
-    if (el.querySelector('.jp-toast-time-ago')) {
+    // Check both inside the message and in the parent (covers button bar sibling)
+    const elParent = el.parentElement;
+    if (
+      el.querySelector('.jp-toast-time-ago') ||
+      (elParent && elParent.querySelector('.jp-toast-time-ago'))
+    ) {
       continue;
     }
     const msg = el.textContent || '';
@@ -142,7 +147,6 @@ function injectTimeAgoIntoCenter(center: Element): void {
     const timeEl = createTimeAgoElement(createdAt);
 
     // If a button bar exists, place time-ago inside it (left-aligned)
-    const elParent = el.parentElement;
     const bar = elParent ? elParent.querySelector('.jp-toast-buttonBar') : null;
     if (bar) {
       timeEl.style.marginTop = '0';
