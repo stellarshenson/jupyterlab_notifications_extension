@@ -43,6 +43,14 @@ interface INotificationData {
 const POLL_INTERVAL = 30000;
 
 /**
+ * Module-level map from normalised message text to server-side createdAt
+ * timestamps. Populated when toasts are created so the notification center
+ * injector can use the same authoritative timestamps.
+ */
+const serverCreatedAtMap = new Map<string, number[]>();
+const normalizeMsg = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
+/**
  * Create and return a styled time-ago DOM element.
  */
 function createTimeAgoElement(createdAt: number): HTMLDivElement {
@@ -52,6 +60,7 @@ function createTimeAgoElement(createdAt: number): HTMLDivElement {
   el.style.fontSize = '0.75em';
   el.style.color = 'var(--jp-ui-font-color2, #888)';
   el.style.marginTop = '4px';
+  el.dataset.createdAt = String(createdAt);
   return el;
 }
 
@@ -68,11 +77,12 @@ function injectTimeAgo(
   notifId: string
 ): void {
   setTimeout(() => {
+    const normalMsg = normalizeMsg(message);
     const toasts = Array.from(document.querySelectorAll('.jp-toast-message'));
     let target: Element | null = null;
     for (const el of toasts) {
       if (
-        el.textContent === message &&
+        normalizeMsg(el.textContent || '') === normalMsg &&
         !el.querySelector('.jp-toast-time-ago')
       ) {
         target = el;
@@ -116,15 +126,15 @@ function injectTimeAgo(
  */
 function injectTimeAgoIntoCenter(center: Element): void {
   const items = Array.from(center.querySelectorAll('.jp-toast-message'));
-  const notifications = Notification.manager.notifications;
 
-  // Build a lookup from message text to createdAt, handling duplicates
-  // by consuming matched entries (shift from a per-message list)
-  const lookup = new Map<string, number[]>();
-  for (const n of notifications) {
-    const list = lookup.get(n.message) || [];
+  // Use server-side timestamps (authoritative) with JupyterLab manager
+  // timestamps as fallback for notifications not created by our extension.
+  const fallbackLookup = new Map<string, number[]>();
+  for (const n of Notification.manager.notifications) {
+    const key = normalizeMsg(n.message);
+    const list = fallbackLookup.get(key) || [];
     list.push(n.createdAt);
-    lookup.set(n.message, list);
+    fallbackLookup.set(key, list);
   }
 
   const injected: HTMLDivElement[] = [];
@@ -138,8 +148,11 @@ function injectTimeAgoIntoCenter(center: Element): void {
     ) {
       continue;
     }
-    const msg = el.textContent || '';
-    const timestamps = lookup.get(msg);
+    const msg = normalizeMsg(el.textContent || '');
+    // Prefer server-side timestamps; fall back to JupyterLab manager
+    const serverTs = serverCreatedAtMap.get(msg);
+    const timestamps =
+      serverTs && serverTs.length > 0 ? serverTs : fallbackLookup.get(msg);
     if (!timestamps || timestamps.length === 0) {
       continue;
     }
@@ -167,30 +180,13 @@ function injectTimeAgoIntoCenter(center: Element): void {
       clearInterval(refreshInterval);
       return;
     }
-    // Re-read timestamps for accuracy
-    const fresh = Notification.manager.notifications;
-    const freshLookup = new Map<string, number[]>();
-    for (const n of fresh) {
-      const list = freshLookup.get(n.message) || [];
-      list.push(n.createdAt);
-      freshLookup.set(n.message, list);
-    }
     for (const el of injected) {
       if (!document.body.contains(el)) {
         continue;
       }
-      const parent = el.parentElement;
-      if (!parent) {
-        continue;
-      }
-      // Get the message text excluding the time-ago element itself
-      const msg = Array.from(parent.childNodes)
-        .filter(node => node !== el)
-        .map(node => node.textContent || '')
-        .join('');
-      const ts = freshLookup.get(msg);
-      if (ts && ts.length > 0) {
-        el.textContent = formatTimeAgo(ts.shift()!);
+      const ts = Number(el.dataset.createdAt);
+      if (ts) {
+        el.textContent = formatTimeAgo(ts);
       }
     }
   }, 10000);
@@ -286,6 +282,12 @@ async function fetchAndDisplayNotifications(
           notif.type,
           options
         );
+
+        // Store server-side timestamp for notification center lookup
+        const key = normalizeMsg(notif.message);
+        const list = serverCreatedAtMap.get(key) || [];
+        list.push(notif.createdAt);
+        serverCreatedAtMap.set(key, list);
 
         // Inject a time-ago element into the toast DOM
         injectTimeAgo(notif.message, notif.createdAt, notifId);
