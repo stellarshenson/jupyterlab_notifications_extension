@@ -82,7 +82,7 @@ function injectTimeAgo(
     let target: Element | null = null;
     for (const el of toasts) {
       if (
-        normalizeMsg(el.textContent || '') === normalMsg &&
+        normalizeMsg((el as HTMLElement).innerText || '') === normalMsg &&
         !el.querySelector('.jp-toast-time-ago')
       ) {
         target = el;
@@ -148,7 +148,7 @@ function injectTimeAgoIntoCenter(center: Element): void {
     ) {
       continue;
     }
-    const msg = normalizeMsg(el.textContent || '');
+    const msg = normalizeMsg((el as HTMLElement).innerText || '');
     // Prefer server-side timestamps; fall back to JupyterLab manager
     const serverTs = serverCreatedAtMap.get(msg);
     const timestamps =
