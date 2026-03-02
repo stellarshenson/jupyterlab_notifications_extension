@@ -193,11 +193,70 @@ function injectTimeAgoIntoCenter(center: Element): void {
 }
 
 /**
+ * Inject time-ago into a single toast element using Notification.manager
+ * timestamps. Used by the MutationObserver for toasts NOT created by our
+ * extension (e.g. JupyterLab culler, file upload, kernel notifications).
+ */
+function injectTimeAgoIntoToast(toast: HTMLElement): void {
+  const msgEl = toast.querySelector('.jp-toast-message') as HTMLElement | null;
+  if (!msgEl) {
+    return;
+  }
+  const parent = msgEl.parentElement;
+  if (
+    msgEl.querySelector('.jp-toast-time-ago') ||
+    (parent && parent.querySelector('.jp-toast-time-ago'))
+  ) {
+    return;
+  }
+  const msg = normalizeMsg(msgEl.innerText || '');
+
+  // Check server-side map first, then fall back to manager timestamps
+  const serverTs = serverCreatedAtMap.get(msg);
+  let createdAt: number | null = null;
+  if (serverTs && serverTs.length > 0) {
+    createdAt = serverTs[0];
+  } else {
+    for (const n of Notification.manager.notifications) {
+      if (normalizeMsg(n.message) === msg) {
+        createdAt = n.createdAt;
+        break;
+      }
+    }
+  }
+  if (createdAt === null) {
+    return;
+  }
+
+  const timeEl = createTimeAgoElement(createdAt);
+  const bar = parent ? parent.querySelector('.jp-toast-buttonBar') : null;
+  if (bar) {
+    timeEl.style.marginTop = '0';
+    bar.insertBefore(timeEl, bar.firstChild);
+  } else {
+    msgEl.appendChild(timeEl);
+  }
+
+  // Refresh while the toast is in the DOM
+  const refreshInterval = setInterval(() => {
+    if (!document.body.contains(timeEl)) {
+      clearInterval(refreshInterval);
+      return;
+    }
+    const ts = Number(timeEl.dataset.createdAt);
+    if (ts) {
+      timeEl.textContent = formatTimeAgo(ts);
+    }
+  }, 10000);
+}
+
+/**
  * Set up a MutationObserver to watch for the Notification Center
- * opening and inject time-ago indicators into its list items.
+ * opening and for any toast popup appearing, injecting time-ago
+ * indicators into both.
  *
- * Uses subtree observation to catch both the center being added
- * and its list items being populated after the initial render.
+ * Uses subtree observation to catch the center being added,
+ * its list items being populated, and individual toast popups.
  */
 function observeNotificationCenter(): void {
   const observer = new MutationObserver(mutations => {
@@ -219,6 +278,14 @@ function observeNotificationCenter(): void {
         const existingCenter = node.closest('.jp-Notification-Center');
         if (existingCenter) {
           setTimeout(() => injectTimeAgoIntoCenter(existingCenter), 100);
+          continue;
+        }
+        // Catch toast popups (from any source, not just our extension)
+        const toast = node.classList.contains('Toastify__toast')
+          ? node
+          : node.querySelector('.Toastify__toast');
+        if (toast instanceof HTMLElement) {
+          setTimeout(() => injectTimeAgoIntoToast(toast), 100);
         }
       }
     }
