@@ -1,15 +1,11 @@
 import { formatTimeAgo, appendTimeAgo } from '../utils';
 
 describe('formatTimeAgo', () => {
-  it('returns "just now" for timestamps less than 5 seconds old', () => {
+  it('returns "just now" for timestamps less than 60 seconds old', () => {
     expect(formatTimeAgo(Date.now())).toBe('just now');
-    expect(formatTimeAgo(Date.now() - 4999)).toBe('just now');
-  });
-
-  it('returns seconds for 5-59 seconds', () => {
-    expect(formatTimeAgo(Date.now() - 5000)).toBe('5s ago');
-    expect(formatTimeAgo(Date.now() - 30000)).toBe('30s ago');
-    expect(formatTimeAgo(Date.now() - 59000)).toBe('59s ago');
+    expect(formatTimeAgo(Date.now() - 5000)).toBe('just now');
+    expect(formatTimeAgo(Date.now() - 30000)).toBe('just now');
+    expect(formatTimeAgo(Date.now() - 59000)).toBe('just now');
   });
 
   it('returns minutes for 1-59 minutes', () => {

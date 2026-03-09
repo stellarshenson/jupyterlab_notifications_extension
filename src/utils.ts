@@ -1,18 +1,15 @@
 /**
  * Format a Unix timestamp (ms) as a relative time string.
  *
- * Returns a compact label such as "just now", "30s ago", "5m ago",
- * "2h ago", or "3d ago".
+ * Returns a compact label such as "just now", "5m ago", "2h ago",
+ * or "3d ago". Anything under 60 seconds is shown as "just now".
  */
 export function formatTimeAgo(createdAt: number): string {
   const delta = Math.max(0, Date.now() - createdAt);
   const seconds = Math.floor(delta / 1000);
 
-  if (seconds < 5) {
-    return 'just now';
-  }
   if (seconds < 60) {
-    return `${seconds}s ago`;
+    return 'just now';
   }
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) {
