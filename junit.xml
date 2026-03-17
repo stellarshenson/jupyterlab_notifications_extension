@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="jest tests" tests="10" failures="0" errors="0" time="1.55">
-  <testsuite name="formatTimeAgo" errors="0" failures="0" skipped="0" timestamp="2026-02-17T15:08:02" time="0.745" tests="9">
-    <testcase classname="formatTimeAgo returns &quot;just now&quot; for timestamps less than 5 seconds old" name="formatTimeAgo returns &quot;just now&quot; for timestamps less than 5 seconds old" time="0.001">
+<testsuites name="jest tests" tests="9" failures="0" errors="0" time="2.943">
+  <testsuite name="jupyterlab_notifications_extension" errors="0" failures="0" skipped="0" timestamp="2026-03-09T11:19:05" time="1.271" tests="1">
+    <testcase classname="jupyterlab_notifications_extension should be tested" name="jupyterlab_notifications_extension should be tested" time="0.003">
     </testcase>
-    <testcase classname="formatTimeAgo returns seconds for 5-59 seconds" name="formatTimeAgo returns seconds for 5-59 seconds" time="0">
+  </testsuite>
+  <testsuite name="formatTimeAgo" errors="0" failures="0" skipped="0" timestamp="2026-03-09T11:19:05" time="1.359" tests="8">
+    <testcase classname="formatTimeAgo returns &quot;just now&quot; for timestamps less than 60 seconds old" name="formatTimeAgo returns &quot;just now&quot; for timestamps less than 60 seconds old" time="0.003">
     </testcase>
-    <testcase classname="formatTimeAgo returns minutes for 1-59 minutes" name="formatTimeAgo returns minutes for 1-59 minutes" time="0">
+    <testcase classname="formatTimeAgo returns minutes for 1-59 minutes" name="formatTimeAgo returns minutes for 1-59 minutes" time="0.001">
     </testcase>
     <testcase classname="formatTimeAgo returns hours for 1-23 hours" name="formatTimeAgo returns hours for 1-23 hours" time="0">
     </testcase>
-    <testcase classname="formatTimeAgo returns days for 1+ days" name="formatTimeAgo returns days for 1+ days" time="0.001">
+    <testcase classname="formatTimeAgo returns days for 1+ days" name="formatTimeAgo returns days for 1+ days" time="0">
     </testcase>
     <testcase classname="formatTimeAgo handles future timestamps by clamping to &quot;just now&quot;" name="formatTimeAgo handles future timestamps by clamping to &quot;just now&quot;" time="0">
     </testcase>
@@ -17,11 +19,7 @@
     </testcase>
     <testcase classname="appendTimeAgo appends parenthesised time suffix to message" name="appendTimeAgo appends parenthesised time suffix to message" time="0">
     </testcase>
-    <testcase classname="appendTimeAgo preserves original message content" name="appendTimeAgo preserves original message content" time="0">
-    </testcase>
-  </testsuite>
-  <testsuite name="jupyterlab_notifications_extension" errors="0" failures="0" skipped="0" timestamp="2026-02-17T15:08:02" time="0.016" tests="1">
-    <testcase classname="jupyterlab_notifications_extension should be tested" name="jupyterlab_notifications_extension should be tested" time="0.001">
+    <testcase classname="appendTimeAgo preserves original message content" name="appendTimeAgo preserves original message content" time="0.001">
     </testcase>
   </testsuite>
 </testsuites>
