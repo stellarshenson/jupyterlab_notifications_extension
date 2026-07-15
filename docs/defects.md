@@ -9,6 +9,7 @@ Most entries were found by the 2026-07-15 adversarial review (bug-hunter + archi
 - [Immediate delivery (WebSocket push)](#immediate-delivery-websocket-push)
 - [Security](#security)
 - [Maintainability and consistency](#maintainability-and-consistency)
+- [Resilience](#resilience)
 - [Documentation](#documentation)
 
 ## Immediate delivery (WebSocket push)
@@ -53,6 +54,12 @@ Most entries were found by the 2026-07-15 adversarial review (bug-hunter + archi
 - [x] `DEF-13` **second logging mechanism introduced by the DEF-5 fix** - LOW; the DEF-5 fix added `logging.getLogger(__name__)` for the `_push_immediate` warning while every other log site uses the jupyter app logger (`self.log` / `server_app.log`), so that one warning surfaced only via the root logger, not the ServerApp log; fix: `_push_immediate(notification, log)` now takes the caller's `self.log`; removed the module logger and `import logging`; `jupyterlab_notifications_extension/routes.py`
   - 2026-07-15 reported: round-2 architect re-review, MINOR consistency
   - 2026-07-15 fixed: warning routes through `self.log` like the other four sites
+
+## Resilience
+
+- [x] `DEF-15` **background poll spilled a console error every cycle while offline** - LOW; `fetchAndDisplayNotifications` did `console.error('Failed to fetch notifications from server', reason)` on every failed 30s poll, so a transient network drop (offline tab, suspended machine, `net::ERR_NETWORK_IO_SUSPENDED`) flooded the console with a fresh red error once per cycle - ungraceful and alarming for an expected, self-healing condition; fix: a module-level `pollOffline` flag warns once on the offline transition and stays silent while it persists, then logs a single info line on reconnect; discrete user-initiated failures (send command, action-button command) keep `console.error` by design; `src/index.ts`
+  - 2026-07-15 reported: user observed the red `Failed to fetch notifications from server` spam during a `net::ERR_NETWORK_IO_SUSPENDED` outage - "handle our issues gracefully, not let it spill"
+  - 2026-07-15 fixed: state-transition logging (warn once offline / info once on recovery); build + 9 jest + lint clean
 
 ## Documentation
 

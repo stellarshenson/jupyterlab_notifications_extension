@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.24] - 2026-07-15
+
+### Fixed
+
+- Notification poll no longer logs a console error on every cycle during a transient network outage; it now warns once when it goes offline and logs once when it reconnects
+
 ## [1.2.23] - 2026-07-15
 
 ### Added

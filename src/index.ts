@@ -378,6 +378,13 @@ function displayNotification(
   injectTimeAgo(notif.message, notif.createdAt, notifId);
 }
 
+/**
+ * Tracks whether the background poll is currently failing, so a transient
+ * network condition (offline tab, suspended machine) is reported once on the
+ * transition rather than spilling a fresh console error every poll cycle.
+ */
+let pollOffline = false;
+
 async function fetchAndDisplayNotifications(
   app: JupyterFrontEnd
 ): Promise<void> {
@@ -385,6 +392,11 @@ async function fetchAndDisplayNotifications(
     const response = await requestAPI<{ notifications: INotificationData[] }>(
       'notifications'
     );
+
+    if (pollOffline) {
+      pollOffline = false;
+      console.log('Notification poll reconnected to server');
+    }
 
     if (response.notifications && response.notifications.length > 0) {
       console.log(
@@ -394,7 +406,16 @@ async function fetchAndDisplayNotifications(
       response.notifications.forEach(notif => displayNotification(app, notif));
     }
   } catch (reason) {
-    console.error('Failed to fetch notifications from server:', reason);
+    // A failed poll is almost always transient (tab offline, machine asleep).
+    // Warn once on the offline transition, then stay silent while it persists -
+    // the poll keeps retrying and recovers on its own without operator action.
+    if (!pollOffline) {
+      pollOffline = true;
+      console.warn(
+        'Notification poll temporarily unavailable; will keep retrying',
+        reason
+      );
+    }
   }
 }
 

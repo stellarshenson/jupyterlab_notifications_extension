@@ -36,6 +36,8 @@ Consolidated acceptance criteria, one `##` section per feature. `[ ]` todo / `[x
   - log: 2026-07-15 implemented (DEF-4)
 - [x] **Poll baseline retained** - the 30s poll runs regardless of the socket
   - log: 2026-07-15 implemented
+- [x] **Poll degrades quietly** - a failing background poll (offline/suspended) warns once on the offline transition and logs once on recovery, never a console error per cycle
+  - log: 2026-07-15 implemented (DEF-15)
 - [ ] **Live: instant display** - an `--now` notification appears in an open tab within ~1s, without waiting for the poll
   - log: 2026-07-15 implemented, pending live verification
 - [ ] **Live: all connected tabs** - the push reaches every currently-open tab, not just one
