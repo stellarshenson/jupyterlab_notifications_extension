@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.23] - 2026-07-15
+
+### Added
+
+- `--now` CLI flag and `"immediate": true` REST field for instant WebSocket push to every open tab, bypassing the 30-second poll
+- Authenticated WebSocket stream endpoint (`/jupyterlab-notifications-extension/stream`) for immediate delivery
+- Opt-in `JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST` server setting for token-free loopback ingest (off by default)
+
+### Changed
+
+- Localhost auth bypass is now opt-in and secure by default
+- Notification ids are now unique across queue drains (process-lifetime monotonic counter)
+- Notifications are deduplicated by id across push and poll, with a bounded seen-set and capped exponential-backoff WebSocket reconnect
+
+### Fixed
+
+- CLI no longer leaks the local server token to a remote `--url` (token scoped to loopback targets, sent via the Authorization header only, not the URL)
+- Ingest server errors return a generic message instead of leaking internal detail
+- Documentation corrections: removed the unenforced 140-character message limit, corrected the notification-type count, clarified the best-effort poll delivery contract
+
 ## 1.1.11
 
 ### Features

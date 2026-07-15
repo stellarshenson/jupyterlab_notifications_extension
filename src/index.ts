@@ -4,13 +4,15 @@ import {
 } from '@jupyterlab/application';
 
 import { ICommandPalette, Dialog, Notification } from '@jupyterlab/apputils';
+import { URLExt } from '@jupyterlab/coreutils';
+import { ServerConnection } from '@jupyterlab/services';
 import { Widget } from '@lumino/widgets';
 import {
   ReadonlyJSONValue,
   ReadonlyPartialJSONObject
 } from '@lumino/coreutils';
 
-import { requestAPI } from './request';
+import { requestAPI, API_NAMESPACE } from './request';
 import { formatTimeAgo } from './utils';
 
 /**
@@ -296,6 +298,86 @@ function observeNotificationCenter(): void {
 /**
  * Fetch and display notifications from the server
  */
+/**
+ * IDs of notifications already displayed. A notification can arrive via
+ * both the WebSocket push and the poll, so this dedups across both paths.
+ * Bounded to MAX_SEEN_IDS (oldest evicted) - an id can never legitimately
+ * re-arrive once its push and single poll delivery are past, so a large
+ * cap is ample and prevents unbounded growth on long-lived tabs.
+ */
+const seenNotificationIds = new Set<string>();
+const MAX_SEEN_IDS = 500;
+
+/**
+ * Display a single notification, skipping duplicates by id.
+ * Shared by the WebSocket push path and the polling path.
+ */
+function displayNotification(
+  app: JupyterFrontEnd,
+  notif: INotificationData
+): void {
+  if (notif.id && seenNotificationIds.has(notif.id)) {
+    return;
+  }
+  if (notif.id) {
+    seenNotificationIds.add(notif.id);
+    // Evict the oldest id (Set preserves insertion order) to bound memory
+    if (seenNotificationIds.size > MAX_SEEN_IDS) {
+      const oldest = seenNotificationIds.values().next().value;
+      if (oldest !== undefined) {
+        seenNotificationIds.delete(oldest);
+      }
+    }
+  }
+
+  // Build options object with explicit type
+  const options: Notification.IOptions<ReadonlyJSONValue> = {
+    autoClose: notif.autoClose
+  };
+
+  // Add data field if present
+  if (notif.data !== undefined) {
+    options.data = notif.data;
+  }
+
+  // Build actions array if present
+  if (notif.actions && notif.actions.length > 0) {
+    options.actions = notif.actions.map(action => ({
+      label: action.label,
+      caption: action.caption || '',
+      displayType: action.displayType || 'default',
+      callback: () => {
+        // If commandId provided, execute the command
+        if (action.commandId) {
+          app.commands.execute(action.commandId, action.args).catch(err => {
+            console.error(
+              `Failed to execute command '${action.commandId}':`,
+              err
+            );
+          });
+        }
+        // Default: button click dismisses notification (built-in behavior)
+      }
+    }));
+  }
+
+  // Display notification
+  const notifId = Notification.manager.notify(
+    notif.message,
+    notif.type,
+    options
+  );
+
+  // Store server-side timestamp for notification center lookup
+  const key = normalizeMsg(notif.message);
+  const list = serverCreatedAtMap.get(key) || [];
+  list.push(notif.createdAt);
+  serverCreatedAtMap.set(key, list);
+
+  // Inject a time-ago element into the toast DOM
+  injectTimeAgo(notif.message, notif.createdAt, notifId);
+}
+
 async function fetchAndDisplayNotifications(
   app: JupyterFrontEnd
 ): Promise<void> {
@@ -309,60 +391,84 @@ async function fetchAndDisplayNotifications(
         `Received ${response.notifications.length} notification(s) from server`
       );
 
-      response.notifications.forEach(notif => {
-        // Build options object with explicit type
-        const options: Notification.IOptions<ReadonlyJSONValue> = {
-          autoClose: notif.autoClose
-        };
-
-        // Add data field if present
-        if (notif.data !== undefined) {
-          options.data = notif.data;
-        }
-
-        // Build actions array if present
-        if (notif.actions && notif.actions.length > 0) {
-          options.actions = notif.actions.map(action => ({
-            label: action.label,
-            caption: action.caption || '',
-            displayType: action.displayType || 'default',
-            callback: () => {
-              // If commandId provided, execute the command
-              if (action.commandId) {
-                app.commands
-                  .execute(action.commandId, action.args)
-                  .catch(err => {
-                    console.error(
-                      `Failed to execute command '${action.commandId}':`,
-                      err
-                    );
-                  });
-              }
-              // Default: button click dismisses notification (built-in behavior)
-            }
-          }));
-        }
-
-        // Display notification
-        const notifId = Notification.manager.notify(
-          notif.message,
-          notif.type,
-          options
-        );
-
-        // Store server-side timestamp for notification center lookup
-        const key = normalizeMsg(notif.message);
-        const list = serverCreatedAtMap.get(key) || [];
-        list.push(notif.createdAt);
-        serverCreatedAtMap.set(key, list);
-
-        // Inject a time-ago element into the toast DOM
-        injectTimeAgo(notif.message, notif.createdAt, notifId);
-      });
+      response.notifications.forEach(notif => displayNotification(app, notif));
     }
   } catch (reason) {
     console.error('Failed to fetch notifications from server:', reason);
   }
+}
+
+/**
+ * Reconnect backoff for the notification stream. On repeated failure the
+ * delay grows exponentially up to a cap, and the client gives up after a
+ * bounded number of consecutive attempts - the 30s poll remains the
+ * baseline, so giving up degrades to poll-only rather than losing anything.
+ */
+const RECONNECT_BASE_MS = 5000;
+const RECONNECT_MAX_MS = 60000;
+const RECONNECT_MAX_ATTEMPTS = 10;
+
+/**
+ * Open a WebSocket to the server's notification stream for immediate
+ * ("--now") delivery. Notifications pushed here display instantly rather
+ * than waiting for the next poll. Reconnects with capped exponential
+ * backoff and gives up after RECONNECT_MAX_ATTEMPTS; the poll is the
+ * baseline so a down socket never loses more than poll latency.
+ */
+function connectNotificationStream(app: JupyterFrontEnd): void {
+  const settings = ServerConnection.makeSettings();
+  let url = URLExt.join(settings.wsUrl, API_NAMESPACE, 'stream');
+  if (settings.token) {
+    url += `?token=${encodeURIComponent(settings.token)}`;
+  }
+
+  let attempts = 0;
+
+  const connect = (): void => {
+    const ws = new settings.WebSocket(url);
+
+    ws.onopen = () => {
+      attempts = 0; // reset backoff once connected
+      console.log('Notification stream connected');
+    };
+
+    ws.onmessage = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          notifications: INotificationData[];
+        };
+        if (payload.notifications) {
+          payload.notifications.forEach(notif =>
+            displayNotification(app, notif)
+          );
+        }
+      } catch (err) {
+        console.error('Failed to parse notification stream message:', err);
+      }
+    };
+
+    ws.onclose = () => {
+      attempts += 1;
+      if (attempts > RECONNECT_MAX_ATTEMPTS) {
+        console.warn(
+          `Notification stream: giving up after ${RECONNECT_MAX_ATTEMPTS} ` +
+            'attempts; falling back to polling only'
+        );
+        return;
+      }
+      const delay = Math.min(
+        RECONNECT_BASE_MS * 2 ** (attempts - 1),
+        RECONNECT_MAX_MS
+      );
+      setTimeout(connect, delay);
+    };
+
+    ws.onerror = () => {
+      ws.close();
+    };
+  };
+
+  connect();
 }
 
 /**
@@ -550,10 +656,13 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // Watch for Notification Center opening to inject time-ago
     observeNotificationCenter();
 
+    // Open the WebSocket stream for immediate ("--now") push delivery
+    connectNotificationStream(app);
+
     // Fetch notifications immediately on startup
     fetchAndDisplayNotifications(app);
 
-    // Set up periodic polling for new notifications
+    // Set up periodic polling for new notifications (baseline/fallback)
     setInterval(() => {
       fetchAndDisplayNotifications(app);
     }, POLL_INTERVAL);

@@ -3,6 +3,11 @@ import { URLExt } from '@jupyterlab/coreutils';
 import { ServerConnection } from '@jupyterlab/services';
 
 /**
+ * The server extension's URL namespace (single source; see also routes.py).
+ */
+export const API_NAMESPACE = 'jupyterlab-notifications-extension';
+
+/**
  * Call the server extension
  *
  * @param endPoint API REST end point for the extension
@@ -15,11 +20,7 @@ export async function requestAPI<T>(
 ): Promise<T> {
   // Make request to Jupyter API
   const settings = ServerConnection.makeSettings();
-  const requestUrl = URLExt.join(
-    settings.baseUrl,
-    'jupyterlab-notifications-extension', // our server extension's API namespace
-    endPoint
-  );
+  const requestUrl = URLExt.join(settings.baseUrl, API_NAMESPACE, endPoint);
 
   let response: Response;
   try {

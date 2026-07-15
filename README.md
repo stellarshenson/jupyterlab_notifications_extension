@@ -30,11 +30,12 @@ Interactive dialog with message input, type selection, auto-close timing, and ac
 - REST API for external systems to POST notifications with authentication
 - Command palette integration with interactive dialog
 - Programmatic command API for extensions and automation
-- Five notification types (info, success, warning, error, in-progress)
+- Six notification types (default, info, success, warning, error, in-progress)
 - Configurable auto-close with millisecond precision or manual dismiss
 - Action buttons with optional JupyterLab command execution
 - Dynamic time-ago indicator showing when each notification was generated
 - Broadcast delivery via 30-second polling
+- Immediate WebSocket push for instant display (`--now` / `"immediate": true`)
 - In-memory queue cleared after delivery
 
 ## Installation
@@ -49,7 +50,9 @@ pip install jupyterlab_notifications_extension
 
 ### POST /jupyterlab-notifications-extension/ingest
 
-Send notifications to JupyterLab. Requires authentication via `Authorization: token <TOKEN>` header or `?token=<TOKEN>` query parameter. Requests from localhost (127.0.0.1, ::1) skip authentication.
+Send notifications to JupyterLab. Requires authentication via `Authorization: token <TOKEN>` header or `?token=<TOKEN>` query parameter.
+
+Token-free localhost ingest is opt-in and off by default: set the environment variable `JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST=1` on the server to let genuine loopback (127.0.0.1, ::1) requests skip authentication. It is disabled by default because a same-host reverse proxy makes every external client's address appear as `127.0.0.1`, which would otherwise open ingest to unauthenticated callers.
 
 **Endpoint**: `POST /jupyterlab-notifications-extension/ingest`
 
@@ -60,6 +63,7 @@ Send notifications to JupyterLab. Requires authentication via `Authorization: to
   "message": "Your notification message",
   "type": "info",
   "autoClose": 5000,
+  "immediate": true,
   "actions": [
     {
       "label": "Click here",
@@ -72,12 +76,13 @@ Send notifications to JupyterLab. Requires authentication via `Authorization: to
 
 **Request Parameters**:
 
-| Field       | Type           | Required | Default  | Description                                                                                                             |
-| ----------- | -------------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `message`   | string         | Yes      | -        | Notification text (max 140 characters)                                                                                  |
-| `type`      | string         | No       | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress`                                           |
-| `autoClose` | number/boolean | No       | `5000`   | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast) |
-| `actions`   | array          | No       | `[]`     | Action buttons (see below)                                                                                              |
+| Field       | Type           | Required | Default  | Description                                                                                                                            |
+| ----------- | -------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `message`   | string         | Yes      | -        | Notification text                                                                                                                      |
+| `type`      | string         | No       | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress`                                                          |
+| `autoClose` | number/boolean | No       | `5000`   | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast)                |
+| `immediate` | boolean        | No       | `false`  | Push instantly to connected clients via WebSocket instead of waiting for the next poll (see [Immediate Delivery](#immediate-delivery)) |
+| `actions`   | array          | No       | `[]`     | Action buttons (see below)                                                                                                             |
 
 **Action Button Schema**:
 
@@ -96,7 +101,7 @@ Note: Clicking any button dismisses the notification. If `commandId` is provided
 ```json
 {
   "success": true,
-  "notification_id": "notif_1762549476180_0"
+  "notification_id": "notif_1762549476180_1"
 }
 ```
 
@@ -172,9 +177,14 @@ jupyterlab-notify -m "Help Available!" --action "Open Help" \
 
 # Silent mode (notification center only, no toast)
 jupyterlab-notify -m "Background task finished" --auto-close 0
+
+# Immediate display (push now, don't wait for the next poll)
+jupyterlab-notify -m "Deploy finished" --now
 ```
 
 **URL auto-detection**: Queries `jupyter server list --json` to find running servers and constructs localhost URL. Falls back to `JUPYTERHUB_SERVICE_PREFIX` environment variable or `localhost:8888`.
+
+**`--now`**: Pushes the notification instantly to any open JupyterLab tab via WebSocket instead of waiting up to 30 seconds for the next poll (see [Immediate Delivery](#immediate-delivery)).
 
 ### cURL
 
@@ -194,17 +204,33 @@ curl -X POST http://jupyterhub.example.com/user/alice/jupyterlab-notifications-e
   -H "Content-Type: application/json" \
   -H "Authorization: token YOUR_JUPYTER_TOKEN" \
   -d '{"message": "Deployment complete", "type": "info"}'
+
+# Immediate display - push now instead of waiting for the next poll
+curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Deploy finished", "type": "success", "immediate": true}'
 ```
+
+## Immediate Delivery
+
+By default a notification waits up to 30 seconds for the frontend's next poll before it appears. Setting `immediate` (REST/cURL) or passing `--now` (CLI) pushes it instantly to every open JupyterLab tab over a WebSocket, so it displays the moment it is sent.
+
+- **Transport**: the frontend keeps a WebSocket open to `/jupyterlab-notifications-extension/stream`; the server pushes flagged notifications to all connected clients
+- **Push reaches every connected tab**: unlike the poll, the immediate push is delivered to all currently-open tabs at once
+- **Poll is best-effort**: the poll queue is a single-consumer destructive drain - the first tab to poll empties it for all tabs - so a tab whose socket is down at push time is not guaranteed to receive that notification via the poll; the push is an accelerator over a best-effort baseline, not a durable per-client queue
+- **Keepalive**: the socket uses ping/pong to survive proxy idle timeouts (works behind JupyterHub)
+- **De-duplication**: the frontend tracks notification IDs (bounded), so a notification arriving via both the push and the poll is displayed only once
+- **Reconnect**: the socket reconnects with capped exponential backoff and gives up after a bounded number of attempts, degrading to poll-only
 
 ## Time-Ago Indicator
 
-Each notification displays a relative timestamp (e.g., `just now`, `30s ago`, `5m ago`, `2h ago`, `3d ago`) that updates every 10 seconds while the notification remains visible. The indicator appears below the message when no action buttons are present, or inline with the button bar when buttons exist. The notification center panel also shows time-ago for all listed notifications.
+Each notification displays a relative timestamp (e.g., `just now`, `5m ago`, `2h ago`, `3d ago`) that updates every 10 seconds while the notification remains visible. Anything under a minute shows `just now`. The indicator appears below the message when no action buttons are present, or inline with the button bar when buttons exist. The notification center panel also shows time-ago for all listed notifications.
 
 ## Architecture
 
 Broadcast-only model - all notifications delivered to the JupyterLab server.
 
-**Flow**: External system POSTs to `/jupyterlab-notifications-extension/ingest` -> Server queues in memory -> Frontend polls `/jupyterlab-notifications-extension/notifications` every 30 seconds -> Displays via JupyterLab notification manager -> Clears queue after fetch.
+**Flow**: External system POSTs to `/jupyterlab-notifications-extension/ingest` -> Server queues in memory -> Frontend polls `/jupyterlab-notifications-extension/notifications` every 30 seconds -> Displays via JupyterLab notification manager -> Clears queue after fetch. Notifications flagged `immediate` are additionally pushed over a WebSocket (`/jupyterlab-notifications-extension/stream`) for instant display, deduplicated against the poll by notification ID.
 
 ## Troubleshooting
 

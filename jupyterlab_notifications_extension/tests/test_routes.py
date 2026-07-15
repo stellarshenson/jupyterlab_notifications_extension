@@ -79,45 +79,63 @@ async def test_notification_with_actions(jp_fetch):
     assert notification["actions"][0]["label"] == "Retry"
 
 
-async def test_localhost_no_auth_required(jp_fetch):
-    """Test that localhost requests work without authentication"""
-    # jp_fetch uses localhost by default, so we'll make a request without auth headers
-    # The handler should detect localhost and skip authentication
-    response = await jp_fetch(
-        "jupyterlab-notifications-extension",
-        "ingest",
-        method="POST",
-        body=json.dumps({"message": "Localhost test", "type": "info"})
+async def test_notification_ids_unique_across_drains(jp_fetch):
+    """DEF-2: ids stay unique even after the store is drained (counter, not len)."""
+    r1 = await jp_fetch(
+        "jupyterlab-notifications-extension", "ingest",
+        method="POST", body=json.dumps({"message": "A"})
+    )
+    # Drain the store, resetting len() to 0
+    await jp_fetch("jupyterlab-notifications-extension", "notifications")
+    r2 = await jp_fetch(
+        "jupyterlab-notifications-extension", "ingest",
+        method="POST", body=json.dumps({"message": "B"})
+    )
+    id1 = json.loads(r1.body)["notification_id"]
+    id2 = json.loads(r2.body)["notification_id"]
+    assert id1 != id2
+
+
+async def test_localhost_bypass_is_opt_in(jp_serverapp):
+    """DEF-6: localhost auth bypass is off by default, on only when enabled."""
+    from unittest.mock import patch, MagicMock
+    from jupyterlab_notifications_extension.routes import (
+        NotificationIngestHandler,
+        ALLOW_UNAUTH_LOCALHOST_SETTING,
     )
 
-    assert response.code == 200
-    payload = json.loads(response.body)
-    assert payload["success"] is True
-
-
-async def test_remote_ip_requires_auth(jp_fetch, jp_serverapp):
-    """Test that get_current_user returns None for remote IPs without valid auth"""
-    from unittest.mock import patch, MagicMock
-    from jupyterlab_notifications_extension.routes import NotificationIngestHandler
-
-    # Create a mock handler instance to test the get_current_user logic
     handler = NotificationIngestHandler(jp_serverapp.web_app, MagicMock())
 
-    # Test 1: localhost returns dummy user (bypasses auth)
+    # Default (setting absent/off): localhost does NOT bypass -> parent auth
+    jp_serverapp.web_app.settings.pop(ALLOW_UNAUTH_LOCALHOST_SETTING, None)
     with patch.object(handler, '_is_localhost', return_value=True):
-        user = handler.get_current_user()
-        assert user == {"name": "localhost"}
-
-    # Test 2: remote IP with valid auth returns user from parent
-    with patch.object(handler, '_is_localhost', return_value=False):
-        # Mock parent's get_current_user to return a valid user
-        with patch('jupyter_server.base.handlers.APIHandler.get_current_user', return_value={"name": "testuser"}):
-            user = handler.get_current_user()
-            assert user == {"name": "testuser"}
-
-    # Test 3: remote IP without valid auth returns None from parent
-    with patch.object(handler, '_is_localhost', return_value=False):
-        # Mock parent's get_current_user to return None (no auth)
         with patch('jupyter_server.base.handlers.APIHandler.get_current_user', return_value=None):
-            user = handler.get_current_user()
-            assert user is None
+            assert handler.get_current_user() is None
+
+    # Opt-in enabled: genuine localhost bypasses with a dummy user
+    jp_serverapp.web_app.settings[ALLOW_UNAUTH_LOCALHOST_SETTING] = True
+    with patch.object(handler, '_is_localhost', return_value=True):
+        assert handler.get_current_user() == {"name": "localhost"}
+
+
+async def test_remote_ip_requires_auth(jp_serverapp):
+    """Remote IPs always go through parent auth, even with the opt-in enabled."""
+    from unittest.mock import patch, MagicMock
+    from jupyterlab_notifications_extension.routes import (
+        NotificationIngestHandler,
+        ALLOW_UNAUTH_LOCALHOST_SETTING,
+    )
+
+    handler = NotificationIngestHandler(jp_serverapp.web_app, MagicMock())
+    # Even with the localhost opt-in on, a remote IP must authenticate
+    jp_serverapp.web_app.settings[ALLOW_UNAUTH_LOCALHOST_SETTING] = True
+
+    # Remote IP with valid auth returns user from parent
+    with patch.object(handler, '_is_localhost', return_value=False):
+        with patch('jupyter_server.base.handlers.APIHandler.get_current_user', return_value={"name": "testuser"}):
+            assert handler.get_current_user() == {"name": "testuser"}
+
+    # Remote IP without valid auth returns None from parent
+    with patch.object(handler, '_is_localhost', return_value=False):
+        with patch('jupyter_server.base.handlers.APIHandler.get_current_user', return_value=None):
+            assert handler.get_current_user() is None

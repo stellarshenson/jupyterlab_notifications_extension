@@ -7,7 +7,13 @@ except ImportError:
     import warnings
     warnings.warn("Importing 'jupyterlab_notifications_extension' outside a proper installation.")
     __version__ = "dev"
-from .routes import setup_route_handlers
+import os
+
+from .routes import setup_route_handlers, ALLOW_UNAUTH_LOCALHOST_SETTING
+
+# Env var to opt in to token-free localhost ingest (secure by default: off).
+# Mirrors jupyter_server's own JUPYTER_SERVER_ALLOW_UNAUTHENTICATED_ACCESS idiom.
+_ALLOW_UNAUTH_LOCALHOST_ENV = "JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST"
 
 
 def _jupyter_labextension_paths():
@@ -32,5 +38,13 @@ def _load_jupyter_server_extension(server_app):
         JupyterLab application instance
     """
     setup_route_handlers(server_app.web_app)
+
+    # Opt-in, secure by default: token-free localhost ingest is only allowed
+    # when explicitly enabled via env var (unsafe behind a same-host proxy).
+    allow_localhost = os.environ.get(
+        _ALLOW_UNAUTH_LOCALHOST_ENV, ""
+    ).lower() in ("1", "true", "yes")
+    server_app.web_app.settings[ALLOW_UNAUTH_LOCALHOST_SETTING] = allow_localhost
+
     name = "jupyterlab_notifications_extension"
     server_app.log.info(f"Registered {name} server extension")

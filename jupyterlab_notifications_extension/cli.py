@@ -3,7 +3,8 @@
 CLI tool to send notifications to JupyterLab via the notification extension.
 
 Sends notifications via HTTP API to a running JupyterLab server.
-Auto-detects URL from running servers. Localhost requests do not require authentication.
+Auto-detects the URL and auth token from running servers. Remote servers
+(explicit --url) require an explicit --token.
 
 Usage:
     # Basic notification (auto-detects URL)
@@ -22,6 +23,7 @@ import os
 import subprocess
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 
 
 def get_jupyter_base_url():
@@ -62,6 +64,53 @@ def get_jupyter_base_url():
     return f"http://localhost:{port}"
 
 
+def detect_token():
+    """
+    Auto-detect an auth token.
+
+    Localhost ingest is secured by default server-side (the token-free
+    bypass is opt-in), so the CLI authenticates with a real token wherever
+    one is available - environment first, then a running server's token.
+
+    Checks in order:
+    1. JUPYTERHUB_API_TOKEN / JPY_API_TOKEN / JUPYTER_TOKEN env vars
+    2. jupyter server list --json - the running server's token
+    """
+    token = (
+        os.environ.get('JUPYTERHUB_API_TOKEN') or
+        os.environ.get('JPY_API_TOKEN') or
+        os.environ.get('JUPYTER_TOKEN')
+    )
+    if token:
+        return token
+
+    try:
+        result = subprocess.run(
+            ['jupyter', 'server', 'list', '--json'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            first_line = result.stdout.strip().split('\n')[0]
+            server_info = json.loads(first_line)
+            return server_info.get('token') or None
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    return None
+
+
+def _is_loopback_url(url):
+    """True if the URL's host is loopback - safe to attach a locally-detected token.
+
+    Uses the parsed hostname (not a substring match) so tricks like
+    http://127.0.0.1@evil.com/ or http://localhost.evil.com/ resolve to the
+    real host (evil.com) and are correctly treated as remote.
+    """
+    return urlparse(url).hostname in ('127.0.0.1', 'localhost', '::1')
+
+
 def send_notification_api(
     base_url: str = None,
     message: str = "Hello from notification script!",
@@ -70,6 +119,7 @@ def send_notification_api(
     actions: list = None,
     data: dict = None,
     token: str = None,
+    immediate: bool = False,
     verbose: bool = False
 ):
     """
@@ -83,46 +133,34 @@ def send_notification_api(
         actions: List of action dictionaries with label, caption, and displayType
         data: Optional arbitrary data to attach to the notification
         token: Authentication token (optional for localhost)
+        immediate: Push instantly to connected clients via WebSocket (--now)
         verbose: Print debug information
     """
-    # Auto-detect base URL if not provided
+    # Auto-detect base URL if not provided (always a loopback address).
     if base_url is None:
         base_url = get_jupyter_base_url()
 
     if verbose:
         print(f"Using base URL: {base_url}")
 
-    # Check if target is localhost
-    is_localhost = (
-        base_url.startswith('http://localhost') or
-        base_url.startswith('http://127.0.0.1') or
-        base_url.startswith('http://[::1]')
-    )
-
-    # Auto-detect token from environment variables if not provided (skip for localhost)
-    if not is_localhost and token is None:
-        token = (
-            os.environ.get('JUPYTERHUB_API_TOKEN') or
-            os.environ.get('JPY_API_TOKEN') or
-            os.environ.get('JUPYTER_TOKEN')
-        )
+    # Auto-detect a token only for a loopback target (auto-detected, or an
+    # explicit 127.0.0.1/localhost --url). The server's token-free localhost
+    # bypass is opt-in / off by default, so a token is normally required; but
+    # never auto-attach the local server's token to a remote --url - that would
+    # leak it. Pass --token explicitly for a remote server.
+    if token is None and _is_loopback_url(base_url):
+        token = detect_token()
 
     if verbose:
-        if is_localhost:
-            print("Target is localhost - skipping authentication")
-        elif token:
+        if token:
             print("Using authentication token")
         else:
-            print("No token provided for remote host")
+            print("No authentication token (pass --token for a remote server)")
         print()
 
-    # Construct the endpoint URL
+    # Construct the endpoint URL. The token travels in the Authorization header
+    # only (below), never in the URL, so it does not land in server access logs.
     endpoint = f"{base_url}/jupyterlab-notifications-extension/ingest"
-
-    # Add token to URL if available and not localhost
-    if token and not is_localhost:
-        separator = '&' if '?' in endpoint else '?'
-        endpoint = f"{endpoint}{separator}token={token}"
 
     # Build notification payload
     payload = {
@@ -136,6 +174,9 @@ def send_notification_api(
 
     if data is not None:
         payload["data"] = data
+
+    if immediate:
+        payload["immediate"] = True
 
     # Convert to JSON
     json_data = json.dumps(payload).encode('utf-8')
@@ -151,8 +192,8 @@ def send_notification_api(
         'Content-Type': 'application/json'
     }
 
-    # Add authorization header if token is available and not localhost
-    if token and not is_localhost:
+    # Add authorization header if a token is available
+    if token:
         headers['Authorization'] = f'token {token}'
 
     # Create request
@@ -201,6 +242,9 @@ Examples:
 
   # Silent notification (notification center only)
   %(prog)s -m "Background task done" --auto-close 0
+
+  # Immediate display (push now, don't wait for the next poll)
+  %(prog)s -m "Deploy finished" --now
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -235,6 +279,12 @@ Examples:
         "--token",
         default=None,
         help="Auth token for API mode (auto-detected from JUPYTERHUB_API_TOKEN, JPY_API_TOKEN, or JUPYTER_TOKEN)"
+    )
+    parser.add_argument(
+        "--now",
+        action="store_true",
+        dest="immediate",
+        help="Display instantly via WebSocket push instead of waiting for the next poll"
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -323,6 +373,7 @@ Examples:
             actions=actions,
             data=data_dict,
             token=args.token,
+            immediate=args.immediate,
             verbose=args.verbose
         )
         return 0
