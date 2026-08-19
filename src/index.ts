@@ -399,7 +399,7 @@ async function fetchAndDisplayNotifications(
     }
 
     if (response.notifications && response.notifications.length > 0) {
-      console.log(
+      console.debug(
         `Received ${response.notifications.length} notification(s) from server`
       );
 
@@ -450,7 +450,7 @@ function connectNotificationStream(app: JupyterFrontEnd): void {
 
     ws.onopen = () => {
       attempts = 0; // reset backoff once connected
-      console.log('Notification stream connected');
+      console.debug('Notification stream connected');
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -502,7 +502,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
   autoStart: true,
   requires: [ICommandPalette],
   activate: (app: JupyterFrontEnd, palette: ICommandPalette) => {
-    console.log(
+    console.debug(
       'JupyterLab extension jupyterlab_notifications_extension is activated!'
     );
 
@@ -664,7 +664,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
             body: JSON.stringify(payload)
           });
 
-          console.log('Notification sent successfully');
+          console.debug('Notification sent successfully');
         } catch (error) {
           console.error('Failed to send notification:', error);
         }
@@ -688,7 +688,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       fetchAndDisplayNotifications(app);
     }, POLL_INTERVAL);
 
-    console.log(
+    console.debug(
       `Notification polling started (interval: ${POLL_INTERVAL / 1000}s)`
     );
   }

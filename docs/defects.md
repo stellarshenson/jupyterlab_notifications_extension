@@ -10,6 +10,7 @@ Most entries were found by the 2026-07-15 adversarial review (bug-hunter + archi
 - [Security](#security)
 - [Maintainability and consistency](#maintainability-and-consistency)
 - [Resilience](#resilience)
+- [Logging hygiene](#logging-hygiene)
 - [Documentation](#documentation)
 
 ## Immediate delivery (WebSocket push)
@@ -60,6 +61,12 @@ Most entries were found by the 2026-07-15 adversarial review (bug-hunter + archi
 - [x] `DEF-15` **background poll spilled a console error every cycle while offline** - LOW; `fetchAndDisplayNotifications` did `console.error('Failed to fetch notifications from server', reason)` on every failed 30s poll, so a transient network drop (offline tab, suspended machine, `net::ERR_NETWORK_IO_SUSPENDED`) flooded the console with a fresh red error once per cycle - ungraceful and alarming for an expected, self-healing condition; fix: a module-level `pollOffline` flag warns once on the offline transition and stays silent while it persists, then logs a single info line on reconnect; discrete user-initiated failures (send command, action-button command) keep `console.error` by design; `src/index.ts`
   - 2026-07-15 reported: user observed the red `Failed to fetch notifications from server` spam during a `net::ERR_NETWORK_IO_SUSPENDED` outage - "handle our issues gracefully, not let it spill"
   - 2026-07-15 fixed: state-transition logging (warn once offline / info once on recovery); build + 9 jest + lint clean
+
+## Logging hygiene
+
+- [x] `DEF-16` **per-event lifecycle logs at `console.log` buried real errors** - LOW; external lab console triage (C8) found the extension emitting `Received N notification(s)` per 30s poll, `Notification stream connected` per socket open, and `Notification sent successfully` per send, plus one-time activation and polling-started lines, all at `console.log` - part of the ~60 routine log lines that scroll a genuine error out of view within seconds; fix: demoted the five per-event and lifecycle logs to `console.debug`; errors, warns, and the offline/reconnect transition log are unchanged; `src/index.ts`
+  - 2026-08-19 reported: lab-js-errors-summary.md class C8 (console noise), Low; shared finding across the extension fleet
+  - 2026-08-19 fixed: 5 `console.log` -> `console.debug`; build + 9 jest + lint clean
 
 ## Documentation
 

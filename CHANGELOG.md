@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.26] - 2026-08-19
+
+### Changed
+
+- Per-event and one-time lifecycle logs (poll received, stream connected, send ok, activation, polling started) demoted from `console.log` to `console.debug` to reduce console noise; genuine errors and warnings are unchanged
+- Build tooling upgraded to the canonical Makefile 1.37: node, npm and yarn now resolve from a project-local `.nodeenv` instead of the ambient environment, the version is read lazily so a fresh clone cannot publish an unbumped version, and `make test` also runs the Python suite
+
 ## [1.2.24] - 2026-07-15
 
 ### Fixed

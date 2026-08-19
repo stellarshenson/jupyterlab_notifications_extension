@@ -56,6 +56,12 @@ MANIFEST
 *.manifest
 *.spec
 
+# Project-local node environment created by the Makefile (node/npm/yarn)
+.nodeenv/
+
+# Release/build logs (README.md is tracked)
+logs/*.log
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
