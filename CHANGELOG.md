@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.28] - 2026-09-29
+
+### Added
+
+- The agent skill for the `jupyterlab-notify` CLI installs with the wheel, at `<sys.prefix>/share/jupyter/agents/skills/jupyterlab-notifications-extension/SKILL.md`. No agent reads that directory and a wheel cannot write into the home directory, so the README gives the link line that makes it readable; the 1.2.27 entry below still says the skill is not in the wheel, being true of 1.2.27
+- A test comparing the installed copy of the agent skill with the repository copy, so a wheel built without the packaging entry, or from an older `SKILL.md`, fails the suite instead of shipping a stale skill. 187 pytest tests
+
+### Changed
+
+- The README's Agent Skill section carries both link lines: `~/.agents/skills` from the installed copy under `sys.prefix`, and `~/.claude/skills` from a clone
+
 ## [1.2.27] - 2026-09-29
 
 ### Added

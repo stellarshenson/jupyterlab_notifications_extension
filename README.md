@@ -262,7 +262,15 @@ pip uninstall jupyterlab_notifications_extension
 
 `.agents/skills/jupyterlab-notifications-extension/SKILL.md` tells an AI assistant how to drive the `jupyterlab-notify` CLI. It carries only the rules `--help` cannot state; the command reference stays in `jupyterlab-notify --help`.
 
-The skill ships in the repository, not in the wheel. Link it into Claude Code from a clone:
+The skill ships in the repository and in the wheel, which installs it at `<sys.prefix>/share/jupyter/agents/skills/jupyterlab-notifications-extension/SKILL.md`. No agent reads that directory, and a wheel cannot write into the home directory, so one of the two links below is what makes it readable.
+
+After `pip install`, with the Python that runs the lab:
+
+```bash
+mkdir -p ~/.agents/skills && ln -sfn "$(python -c 'import sys; print(sys.prefix)')/share/jupyter/agents/skills/jupyterlab-notifications-extension" ~/.agents/skills/jupyterlab-notifications-extension
+```
+
+From a clone, into Claude Code:
 
 ```bash
 ln -sfn "$PWD/.agents/skills/jupyterlab-notifications-extension" ~/.claude/skills/jupyterlab-notifications-extension
