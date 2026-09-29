@@ -132,3 +132,12 @@ dmypy.json
 
 # Yarn cache
 .yarn/
+
+# graphify code index (generated)
+graphify-out/
+
+# playwright MCP browser profile and logs (generated)
+.playwright-mcp/
+
+# generated test report
+junit.xml

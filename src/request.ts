@@ -3,7 +3,9 @@ import { URLExt } from '@jupyterlab/coreutils';
 import { ServerConnection } from '@jupyterlab/services';
 
 /**
- * The server extension's URL namespace (single source; see also routes.py).
+ * The server extension's URL namespace. Three copies exist on purpose:
+ * here, routes.py, and a third copy in cli.py, which must not import
+ * tornado to send one POST. The path is a published contract.
  */
 export const API_NAMESPACE = 'jupyterlab-notifications-extension';
 
@@ -35,12 +37,23 @@ export async function requestAPI<T>(
     try {
       data = JSON.parse(data);
     } catch (error) {
-      console.log('Not a JSON response body.', response);
+      console.warn('Not a JSON response body.', response);
     }
   }
 
   if (!response.ok) {
-    throw new ServerConnection.ResponseError(response, data.message || data);
+    // jupyter_server's own error bodies use `message`; this extension's use
+    // `error`. Anything else - a proxy's JSON under some third key, an nginx
+    // HTML page, an empty body - has no reason to be readable, so it falls back
+    // to the status line rather than being interpolated into the toast, which
+    // is where "[object Object]" and a truncated <html> came from.
+    const detail = data?.message ?? data?.error;
+    throw new ServerConnection.ResponseError(
+      response,
+      typeof detail === 'string' && detail
+        ? detail
+        : `${response.status} ${response.statusText}`
+    );
   }
 
   return data;

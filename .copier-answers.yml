@@ -9,9 +9,9 @@ has_settings: false
 kind: frontend-and-server
 labextension_name: jupyterlab_notifications_extension
 project_short_description:
-  Jupyterlab extension to receive and display notifications
-  in the main panel. Those can be from the jupyterjub administrator or from other
-  places.
+  JupyterLab extension that shows notifications sent by a
+  JupyterHub administrator or by a script, as a toast and in the notification
+  center.
 python_name: jupyterlab_notifications_extension
 repository: ''
 test: true

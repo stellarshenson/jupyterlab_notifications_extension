@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.27] - 2026-09-29
+
+### Added
+
+- Agent skill at `.agents/skills/jupyterlab-notifications-extension/SKILL.md` telling an AI assistant how to drive the `jupyterlab-notify` CLI; it ships in the repository, not in the wheel, and the command reference stays in `jupyterlab-notify --help`
+- `JUPYTERLAB_NOTIFY_TOKEN` environment variable, this tool's own token source, used for any target including a remote one; prefer it over `--token`, which puts the secret in argv where every local account can read `/proc/<pid>/cmdline`
+- The `data` payload field is documented in the API reference, including the rule that every number inside it must be finite
+- Python test suite for the CLI and a claim sweep that fails while any shipped surface still carries a retired wording; 186 pytest and 18 jest tests
+
+### Changed
+
+- Ingest validates element types, not only presence: a body that is not a JSON object, a `message` that is missing, empty or not a string, and an `actions` element that is not an object with a string `label` are each answered 400 with a message naming the cause
+- `jupyterlab-notify` builds the URL from the server record's own scheme, host and port, substituting a loopback address for a wildcard bind, instead of assuming `http://127.0.0.1`
+- `jupyterlab-notify` exits 2 and lists the candidates when several servers are running and none matches `JUPYTERHUB_SERVICE_PREFIX`, instead of silently taking the first
+- `jupyterlab-notify` prints one line naming the URL it will use, where that address came from, and whether a token is being sent
+- The ambient `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN` and `JUPYTER_TOKEN` belong to the host the CLI runs on, so they are now sent only to a loopback target; a listed server's own runtime token is sent to the address that record is reached at
+- The notification stream reconnects with capped exponential backoff, 5 seconds doubling to a 60-second ceiling, and keeps retrying for as long as the tab is open; it previously gave up after 10 attempts and stayed poll-only for the rest of the session without saying so
+- Send dialog inputs are associated with their labels, the seconds field states its unit and range, and the type list reads as words rather than API values
+- Requirements raised to JupyterLab >= 4.6, Python >= 3.10 and jupyter_server >= 2.21; build tooling upgraded to the canonical Makefile 1.43
+
+### Removed
+
+- `JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST` server setting and the token-free loopback ingest it enabled; every ingest request now needs a token, including from localhost. Behind a same-host reverse proxy every external client's address appears as `127.0.0.1`, so the setting could not distinguish a genuine loopback caller from any client on the network. The 1.2.23 entry below still lists it, being true of 1.2.23
+- `scripts/send_notification.py`, superseded by the `jupyterlab-notify` CLI
+- `setup.py` shim and the committed `package-lock.json`, neither used by the hatchling and jlpm build
+
+### Fixed
+
+- A non-finite number anywhere in the payload (`NaN`, `Infinity`, or a literal that overflows to one) is rejected with 400 at ingest. It was accepted before, and because the poll queue is drained before it is serialised, one such number made the whole batch unparseable in the browser and every other sender's notification in it was lost with no error shown
+- A query string or fragment in `--url` is removed before the endpoint path is appended; `--url 'http://host:8888/?token=abc'` previously sent the request to a path containing the token, which reached the server access log and returned 404
+- A `user:password@` part in `--url` is dropped, because this tool authenticates by token only
+- A malformed body that raises something other than a decode error, such as nesting past the recursion limit or an integer past the 4300-digit limit, is answered 400 like every other malformed body instead of 500, and the CLI reports it in one line instead of a traceback
+- The live time-ago element is hidden from assistive technology; the toast is an assertive live region, so rewriting the label every 10 seconds re-announced the entire notification
+- `jupyterlab-notify` exits 130 on an interrupt instead of printing a traceback
+
 ## [1.2.26] - 2026-08-19
 
 ### Changed

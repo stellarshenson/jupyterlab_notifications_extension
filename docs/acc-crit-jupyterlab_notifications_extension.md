@@ -2,97 +2,383 @@
 
 Consolidated acceptance criteria, one `##` section per feature. `[ ]` todo / `[x]` done; each item carries a `log:` line. Immediate-delivery items marked `[x]` are covered by unit tests or the build; browser-observable behaviours not yet verified in a live tab stay `[ ]` with a `pending live verification` log.
 
-## Contents
+## Authors
 
-- [Immediate Delivery](#immediate-delivery)
-- [Time-Ago Indicator](#time-ago-indicator)
-- [API](#api)
+- `@kj` Konrad Jelen
 
-## Immediate Delivery
+## Immediate Delivery `IMMED`
 
 `--now` (CLI) / `"immediate": true` (REST) pushes a notification over a WebSocket to every open tab instantly, instead of waiting up to 30s for the poll. Push is an accelerator over a best-effort poll baseline, deduped by notification id.
 
-- [x] **CLI flag** - `jupyterlab-notify --now` sets `immediate: true` in the POST payload
-  - log: 2026-07-15 implemented
-- [x] **REST field** - `"immediate": true` in the ingest body triggers the push path
-  - log: 2026-07-15 implemented
-- [x] **Server push** - on ingest with `immediate`, the notification is written to every connected stream listener via `_push_immediate`
-  - log: 2026-07-15 implemented; unit-verified (push + dead-listener cleanup)
-- [x] **Queue still populated** - an immediate notification is appended to `_notification_store` before the push, so it is also available to the poll
-  - log: 2026-07-15 implemented
-- [x] **Stream route** - `NotificationStreamHandler` mounted at `/<namespace>/stream` as a WebSocket
-  - log: 2026-07-15 implemented
-- [x] **Stream auth** - the WebSocket enforces `@ws_authenticated`; only authenticated sessions register as listeners
-  - log: 2026-07-15 implemented; confirmed by bug-hunter review
-- [x] **Keepalive** - the stream inherits `WebSocketMixin` ping/pong so idle sockets survive proxy timeouts
-  - log: 2026-07-15 implemented
-- [x] **Id uniqueness** - notification id uses a process-lifetime monotonic counter, unique across store drains
-  - log: 2026-07-15 implemented; `test_notification_ids_unique_across_drains` green
-- [x] **Dedup by id** - `displayNotification` shows a given id once across the push and poll paths
-  - log: 2026-07-15 implemented (jest covers helper; path dedup by construction)
-- [x] **Dedup set bounded** - `seenNotificationIds` capped at 500, oldest evicted, no unbounded growth
-  - log: 2026-07-15 implemented (DEF-3)
-- [x] **Reconnect backoff** - stream reconnects with capped exponential backoff and gives up after 10 attempts, falling back to poll-only
-  - log: 2026-07-15 implemented (DEF-4)
-- [x] **Poll baseline retained** - the 30s poll runs regardless of the socket
-  - log: 2026-07-15 implemented
-- [x] **Poll degrades quietly** - a failing background poll (offline/suspended) warns once on the offline transition and logs once on recovery, never a console error per cycle
-  - log: 2026-07-15 implemented (DEF-15)
-- [x] **Quiet lifecycle logging** - per-event and one-time lifecycle events (poll received, stream connected, send ok, activation, polling started) log at `console.debug`; only genuine errors/warns and state transitions use higher levels
-  - log: 2026-08-19 implemented (DEF-16)
-- [ ] **Live: instant display** - an `--now` notification appears in an open tab within ~1s, without waiting for the poll
-  - log: 2026-07-15 implemented, pending live verification
-- [ ] **Live: all connected tabs** - the push reaches every currently-open tab, not just one
-  - log: 2026-07-15 implemented, pending live verification
-- [ ] **Edge: socket down at push (multi-tab)** - a tab whose socket is down when the push fires is NOT guaranteed the notification via poll (destructive single-consumer drain); documented as best-effort, not a durable per-client queue
-  - log: 2026-07-15 behaviour accepted and documented (DEF-1); durable per-client delivery deferred
-- [ ] **Edge: server older than frontend** - `/stream` 404s; reconnect backs off and gives up after 10 attempts; poll still delivers
-  - log: 2026-07-15 implemented, pending live verification
-- [ ] **Edge: token rotation / 403** - handshake rejected; reconnect gives up, degrades to poll-only, no 5s hammer loop
-  - log: 2026-07-15 implemented, pending live verification
-- [x] **Edge: `immediate` absent/falsy** - no push; notification delivered by poll only
-  - log: 2026-07-15 implemented
-- [x] **Edge: no listeners connected** - push is a no-op; poll delivers on next cycle
-  - log: 2026-07-15 implemented
-- [x] **Edge: listener write fails** - a closed socket is discarded; any other write error is logged and the listener kept
-  - log: 2026-07-15 implemented (DEF-5)
-- [x] **Security: localhost bypass opt-in** - token-free localhost ingest fires only when `JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST=1`; off by default
-  - log: 2026-07-15 implemented (DEF-6); `test_localhost_bypass_is_opt_in` green
-- [x] **Security: remote requires auth** - a non-loopback request always goes through parent auth, even with the opt-in enabled
-  - log: 2026-07-15 implemented; `test_remote_ip_requires_auth` green
-- [x] **Security: CLI authenticates loopback only** - the CLI attaches a detected token (env or running-server token) only for a loopback target (auto-detected, or an explicit `127.0.0.1`/`localhost` `--url`), so it works under secure-by-default including the JupyterHub loopback path
-  - log: 2026-07-15 implemented (DEF-6 follow-through); scoped to loopback via host-parsed `_is_loopback_url` (DEF-12)
-- [x] **Security: no token leak to remote `--url`** - an explicit `--url` never receives the auto-detected local token; a remote server requires an explicit `--token`
-  - log: 2026-07-15 implemented (DEF-12)
-- [x] **Security: token not in URL** - the CLI sends the token in the Authorization header only, never as a `?token=` URL param, so it does not land in server access logs
-  - log: 2026-07-15 implemented (DEF-12)
-- [x] **Security: generic 500** - ingest errors are logged server-side and return a generic message, no internal detail leaked
-  - log: 2026-07-15 implemented (DEF-7)
+- [x] `ACC-IMMED-1` **CLI flag** - HIGH; `jupyterlab-notify --now` sets `immediate: true` in the POST payload
+  - evidence: --now sets payload immediate True in send_notification_api
+  - test-tags: UNIT
+  - test: run jupyterlab-notify -m x --now -v and read the payload
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "HIGH"
+  - log: 2026-09-28T13:34:47Z @kj edited test added "run jupyterlab-notify -m x --now -v and read the payload"
+  - log: 2026-09-28T13:34:47Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:47Z @kj edited evidence added "--now sets payload immediate True in send_notification_api"
+- [x] `ACC-IMMED-2` **REST field** - HIGH; `"immediate": true` in the ingest body triggers the push path
+  - evidence: post() calls _push_immediate when payload.get('immediate') is truthy
+  - test-tags: UNIT
+  - test: POST ingest with immediate true and confirm the push path runs
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "HIGH"
+  - log: 2026-09-28T13:34:47Z @kj edited test added "POST ingest with immediate true and confirm the push path runs"
+  - log: 2026-09-28T13:34:48Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:48Z @kj edited evidence added "post() calls _push_immediate when payload.get('immediate') is truthy"
+- [x] `ACC-IMMED-3` **Server push** - HIGH; on ingest with `immediate`, the notification is written to every connected stream listener via `_push_immediate`
+  - evidence: _push_immediate writes to every listener; dead-listener cleanup unit-verified
+  - test-tags: UNIT
+  - test: attach a stream listener, ingest with immediate, expect the frame
+  - log: 2026-07-15T00:00:00Z @kj implemented; unit-verified (push + dead-listener cleanup)
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "HIGH"
+  - log: 2026-09-28T13:34:48Z @kj edited test added "attach a stream listener, ingest with immediate, expect the frame"
+  - log: 2026-09-28T13:34:48Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:48Z @kj edited evidence added "_push_immediate writes to every listener; dead-listener cleanup unit-verified"
+- [x] `ACC-IMMED-4` **Queue still populated** - MEDIUM; an immediate notification is appended to `_notification_store` before the push, so it is also available to the poll
+  - evidence: _notification_store.append runs before the push
+  - test-tags: UNIT
+  - test: ingest with immediate then GET notifications; the item is in the drain
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:48Z @kj edited test added "ingest with immediate then GET notifications; the item is in the drain"
+  - log: 2026-09-28T13:34:48Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:48Z @kj edited evidence added "_notification_store.append runs before the push"
+- [x] `ACC-IMMED-5` **Stream route** - HIGH; `NotificationStreamHandler` mounted at `/<namespace>/stream` as a WebSocket
+  - evidence: NotificationStreamHandler mounted at namespace/stream through url_path_join
+  - test-tags: UNIT
+  - test: open a websocket against the stream path
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "HIGH"
+  - log: 2026-09-28T13:34:48Z @kj edited test added "open a websocket against the stream path"
+  - log: 2026-09-28T13:34:48Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:48Z @kj edited evidence added "NotificationStreamHandler mounted at namespace/stream through url_path_join"
+- [x] `ACC-IMMED-6` **Stream auth** - CRITICAL; the WebSocket enforces `@ws_authenticated`; only authenticated sessions register as listeners
+  - evidence: check_auth.py fails when @ws_authenticated is removed from the stream handler, which is the guarantee; the unit test only proves which handler serves the route
+  - test-tags: FUNCTIONAL
+  - test: open the stream with no token and expect the handshake refused
+  - log: 2026-07-15T00:00:00Z @kj implemented; confirmed by bug-hunter review
+  - log: 2026-09-28T13:31:45Z @kj edited importance added "CRITICAL"
+  - log: 2026-09-28T13:34:48Z @kj edited test added "open the stream with no token and expect the handshake refused"
+  - log: 2026-09-28T13:34:48Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:48Z @kj edited evidence added "@ws_authenticated on get; the stream has no localhost shortcut"
+  - log: 2026-09-28T15:39:44Z @kj edited test-tags "UNIT" -> "FUNCTIONAL"
+  - log: 2026-09-28T15:39:44Z @kj edited evidence "@ws_authenticated on get; the stream has no localhost shortcut" -> "check_auth.py fails when @ws_authenticated is removed from the stream handler, which is the guarantee; the unit test only proves which handler serves the route"
+- [x] `ACC-IMMED-7` **Keepalive** - MEDIUM; the stream inherits `WebSocketMixin` ping/pong so idle sockets survive proxy timeouts
+  - evidence: WebSocketMixin ping/pong started by super().open()
+  - test-tags: MANUAL
+  - test: hold the socket idle past a proxy timeout
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:48Z @kj edited test added "hold the socket idle past a proxy timeout"
+  - log: 2026-09-28T13:34:49Z @kj edited test-tags added "MANUAL"
+  - log: 2026-09-28T13:34:49Z @kj edited evidence added "WebSocketMixin ping/pong started by super().open()"
+- [x] `ACC-IMMED-8` **Id uniqueness** - MEDIUM; notification id uses a process-lifetime monotonic counter, unique across store drains
+  - evidence: test_notification_ids_unique_across_drains green
+  - test-tags: UNIT
+  - test: ingest, drain, ingest, compare the two ids
+  - log: 2026-07-15T00:00:00Z @kj implemented; `test_notification_ids_unique_across_drains` green
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:49Z @kj edited test added "ingest, drain, ingest, compare the two ids"
+  - log: 2026-09-28T13:34:49Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:49Z @kj edited evidence added "test_notification_ids_unique_across_drains green"
+- [x] `ACC-IMMED-9` **Dedup by id** - HIGH; `displayNotification` shows a given id once across the push and poll paths
+  - evidence: seenNotificationIds checked in displayNotification before notify
+  - test-tags: MANUAL
+  - test: deliver one id by push and by poll; expect one toast
+  - log: 2026-07-15T00:00:00Z @kj implemented (jest covers helper; path dedup by construction)
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "HIGH"
+  - log: 2026-09-28T13:34:49Z @kj edited test added "deliver one id by push and by poll; expect one toast"
+  - log: 2026-09-28T13:34:49Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:49Z @kj edited evidence added "seenNotificationIds checked in displayNotification before notify"
+  - log: 2026-09-28T15:04:22Z @kj edited test-tags "UNIT" -> "MANUAL"
+- [x] `ACC-IMMED-10` **Dedup set bounded** - MEDIUM; `seenNotificationIds` capped at 500, oldest evicted, no unbounded growth
+  - evidence: cap 500, oldest evicted via values().next().value
+  - test-tags: MANUAL
+  - test: display more than 500 distinct ids and measure the set
+  - log: 2026-07-15T00:00:00Z @kj implemented (DEF-3)
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:49Z @kj edited test added "display more than 500 distinct ids and measure the set"
+  - log: 2026-09-28T13:34:49Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:49Z @kj edited evidence added "cap 500, oldest evicted via values().next().value"
+  - log: 2026-09-28T15:04:22Z @kj edited test-tags "UNIT" -> "MANUAL"
+- [x] `ACC-IMMED-11` **Reconnect backoff** - MEDIUM; stream reconnects with capped exponential backoff, 5s doubling to a 60s ceiling, and keeps retrying for as long as the tab is open; no give-up
+  - evidence: reconnectDelay is unit-tested and mutation-proven for the 5s to 60s curve and the cap; the give-up branch was deleted in round 7, so onclose always reschedules
+  - test-tags: UNIT
+  - test: refuse the handshake repeatedly and record the delays
+  - log: 2026-07-15T00:00:00Z @kj implemented (DEF-4)
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:49Z @kj edited test added "refuse the handshake repeatedly and record the delays"
+  - log: 2026-09-28T13:34:49Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:49Z @kj edited evidence added "5s 10s 20s 40s 60s then 60s, gives up on the 11th close"
+  - log: 2026-09-28T15:39:44Z @kj edited evidence "5s 10s 20s 40s 60s then 60s, gives up on the 11th close" -> "reconnectDelay is unit-tested and mutation-proven for the 5s to 60s curve and the cap; the give-up-after-10 branch lives in index.ts, which no unit test reaches"
+  - log: 2026-09-28T20:28:02Z @kj amended text "stream reconnects with capped exponential backoff and gives up after 10 attempts, falling back to poll-only" -> "MEDIUM; stream reconnects with capped exponential backoff, 5s doubling to a 60s ceiling, and keeps retrying for as long as the tab is open; no give-up"
+  - log: 2026-09-28T20:28:02Z @kj edited evidence "reconnectDelay is unit-tested and mutation-proven for the 5s to 60s curve and the cap; the give-up-after-10 branch lives in index.ts, which no unit test reaches" -> "reconnectDelay is unit-tested and mutation-proven for the 5s to 60s curve and the cap; the give-up branch was deleted in round 7, so onclose always reschedules"
+- [x] `ACC-IMMED-12` **Poll baseline retained** - HIGH; the 30s poll runs regardless of the socket
+  - evidence: the setInterval poll runs regardless of socket state
+  - test-tags: MANUAL
+  - test: disable the socket; notifications still arrive within 30s
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "HIGH"
+  - log: 2026-09-28T13:34:49Z @kj edited test added "disable the socket; notifications still arrive within 30s"
+  - log: 2026-09-28T13:34:50Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:50Z @kj edited evidence added "the setInterval poll runs regardless of socket state"
+  - log: 2026-09-28T15:04:22Z @kj edited test-tags "UNIT" -> "MANUAL"
+- [x] `ACC-IMMED-13` **Poll degrades quietly** - LOW; a failing background poll (offline/suspended) warns once on the offline transition and logs once on recovery, never a console error per cycle
+  - evidence: pollOffline warns once, stays silent while down, logs once on reconnect
+  - test-tags: MANUAL
+  - test: block the network and count console errors across cycles
+  - log: 2026-07-15T00:00:00Z @kj implemented (DEF-15)
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "LOW"
+  - log: 2026-09-28T13:34:50Z @kj edited test added "block the network and count console errors across cycles"
+  - log: 2026-09-28T13:34:50Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:50Z @kj edited evidence added "pollOffline warns once, stays silent while down, logs once on reconnect"
+  - log: 2026-09-28T15:04:23Z @kj edited test-tags "UNIT" -> "MANUAL"
+- [x] `ACC-IMMED-14` **Quiet lifecycle logging** - LOW; per-event and one-time lifecycle events (poll received, stream connected, send ok, activation, polling started) log at `console.debug`; only genuine errors/warns and state transitions use higher levels
+  - evidence: five lifecycle logs demoted to console.debug
+  - test-tags: MANUAL
+  - test: load the lab and count log-level console lines
+  - log: 2026-08-19T00:00:00Z @kj implemented (DEF-16)
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "LOW"
+  - log: 2026-09-28T13:34:50Z @kj edited test added "load the lab and count log-level console lines"
+  - log: 2026-09-28T13:34:50Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:50Z @kj edited evidence added "five lifecycle logs demoted to console.debug"
+  - log: 2026-09-28T15:04:23Z @kj edited test-tags "UNIT" -> "MANUAL"
+- [x] `ACC-IMMED-15` **Live: instant display** - HIGH; an `--now` notification appears in an open tab within ~1s, without waiting for the poll
+  - evidence: Galata test asserts the toast within 3s, an order of magnitude under the 30s poll; mutation-proven, deleting the _push_immediate call in the installed server fails it
+  - test-tags: E2E
+  - test: send --now with a tab open and time the toast
+  - log: 2026-07-15T00:00:00Z @kj implemented, pending live verification
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "HIGH"
+  - log: 2026-09-28T13:34:50Z @kj edited test added "send --now with a tab open and time the toast"
+  - log: 2026-09-28T13:34:50Z @kj edited test-tags added "E2E"
+  - log: 2026-09-28T17:13:59Z @kj closed
+- [x] `ACC-IMMED-16` **Live: all connected tabs** - MEDIUM; the push reaches every currently-open tab, not just one
+  - evidence: Galata test opens a second tab and asserts both show the pushed notification; mutation-proven, slicing _stream_listeners to the first listener fails it
+  - test-tags: E2E
+  - test: open two tabs, send --now, expect both to show it
+  - log: 2026-07-15T00:00:00Z @kj implemented, pending live verification
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:50Z @kj edited test added "open two tabs, send --now, expect both to show it"
+  - log: 2026-09-28T13:34:50Z @kj edited test-tags added "E2E"
+  - log: 2026-09-28T17:13:59Z @kj closed
+- [x] `ACC-IMMED-17` **Edge: socket down at push (multi-tab)** - MEDIUM; a tab whose socket is down when the push fires is NOT guaranteed the notification via poll (destructive single-consumer drain); documented as best-effort, not a durable per-client queue
+  - evidence: Galata test posts without immediate to two open tabs and asserts exactly one shows it; mutation-proven, leaving the store uncleared on fetch fails it with 2
+  - test-tags: E2E
+  - test: drop one tab's socket, send --now, check that tab after the next poll
+  - log: 2026-07-15T00:00:00Z @kj behaviour accepted and documented (DEF-1); durable per-client delivery deferred
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:50Z @kj edited test added "drop one tab's socket, send --now, check that tab after the next poll"
+  - log: 2026-09-28T13:34:50Z @kj edited test-tags added "E2E"
+  - log: 2026-09-28T17:13:59Z @kj closed
+  - log: 2026-09-28T17:13:59Z @kj the test proves the destructive single-consumer drain that makes poll delivery best-effort; no socket is dropped, because the criterion asserts an absence of guarantee, which no assertion can carry
+- [x] `ACC-IMMED-18` **Edge: server older than frontend** - MEDIUM; /stream 404s; reconnect backs off to the 60s ceiling and keeps retrying; poll still delivers
+  - evidence: Galata test closes the stream with 1006 and asserts the poll still delivers within 40s and the retry stays at or under 5 attempts; mutation-proven, a constant 5s retry gives 7 and fails it
+  - test-tags: E2E
+  - test: run the frontend against a server with no stream route
+  - log: 2026-07-15T00:00:00Z @kj implemented, pending live verification
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:50Z @kj edited test added "run the frontend against a server with no stream route"
+  - log: 2026-09-28T13:34:51Z @kj edited test-tags added "E2E"
+  - log: 2026-09-28T17:28:17Z @kj closed
+  - log: 2026-09-28T17:28:17Z @kj the give-up after RECONNECT_MAX_ATTEMPTS is not asserted at E2E: exhausting 10 attempts takes about 7.5 minutes of wall clock at the shipped 5s base and 60s cap
+  - log: 2026-09-28T20:28:02Z @kj amended text "`/stream` 404s; reconnect backs off and gives up after 10 attempts; poll still delivers" -> "MEDIUM; /stream 404s; reconnect backs off to the 60s ceiling and keeps retrying; poll still delivers"
+- [x] `ACC-IMMED-19` **Edge: token rotation / 403** - MEDIUM; handshake rejected; reconnect backs off to the 60s ceiling and keeps retrying, warning once in the console; no 5s hammer loop
+  - evidence: the same Galata test parametrised with close code 1008, the handshake-rejected path; poll still delivers and the retry backs off; mutation-proven by the constant-delay run
+  - test-tags: E2E
+  - test: rotate the token mid-session and watch the reconnect back off without hammering
+  - log: 2026-07-15T00:00:00Z @kj implemented, pending live verification
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:51Z @kj edited test added "rotate the token mid-session and watch the reconnect give up"
+  - log: 2026-09-28T13:34:51Z @kj edited test-tags added "E2E"
+  - log: 2026-09-28T17:28:17Z @kj closed
+  - log: 2026-09-28T17:28:17Z @kj the give-up after RECONNECT_MAX_ATTEMPTS is not asserted at E2E: exhausting 10 attempts takes about 7.5 minutes of wall clock at the shipped 5s base and 60s cap
+  - log: 2026-09-28T20:28:02Z @kj amended text "handshake rejected; reconnect gives up, degrades to poll-only, no 5s hammer loop" -> "MEDIUM; handshake rejected; reconnect backs off to the 60s ceiling and keeps retrying, warning once in the console; no 5s hammer loop"
+  - log: 2026-09-28T20:28:03Z @kj edited test "rotate the token mid-session and watch the reconnect give up" -> "rotate the token mid-session and watch the reconnect back off without hammering"
+- [x] `ACC-IMMED-20` **Edge: `immediate` absent/falsy** - MEDIUM; no push; notification delivered by poll only
+  - evidence: the push runs only under payload.get('immediate')
+  - test-tags: UNIT
+  - test: ingest without immediate and expect no push
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:51Z @kj edited test added "ingest without immediate and expect no push"
+  - log: 2026-09-28T13:34:51Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:51Z @kj edited evidence added "the push runs only under payload.get('immediate')"
+- [x] `ACC-IMMED-21` **Edge: no listeners connected** - LOW; push is a no-op; poll delivers on next cycle
+  - evidence: test_push_immediate_with_no_listeners_is_a_noop proves the empty-set call raises nothing and logs no spurious warning; it cannot prove the absence itself, which no assertion carries
+  - test-tags: UNIT
+  - test: ingest with immediate and no sockets open
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "LOW"
+  - log: 2026-09-28T13:34:51Z @kj edited test added "ingest with immediate and no sockets open"
+  - log: 2026-09-28T13:34:51Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:51Z @kj edited evidence added "_push_immediate iterates an empty set; the poll delivers next cycle"
+  - log: 2026-09-28T17:56:08Z @kj edited evidence "_push_immediate iterates an empty set; the poll delivers next cycle" -> "test_push_immediate_with_no_listeners_is_a_noop proves the empty-set call raises nothing and logs no spurious warning; it cannot prove the absence itself, which no assertion carries"
+- [x] `ACC-IMMED-22` **Edge: listener write fails** - MEDIUM; a closed socket is discarded; any other write error is logged and the listener kept
+  - evidence: WebSocketClosedError discards; any other error is logged and the listener kept
+  - test-tags: UNIT
+  - test: force a write error on one listener
+  - log: 2026-07-15T00:00:00Z @kj implemented (DEF-5)
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:51Z @kj edited test added "force a write error on one listener"
+  - log: 2026-09-28T13:34:51Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:51Z @kj edited evidence added "WebSocketClosedError discards; any other error is logged and the listener kept"
+- [-] `ACC-IMMED-23` **Security: localhost bypass opt-in** - CRITICAL; token-free localhost ingest fires only when `JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST=1`; off by default
+  - test-tags: UNIT
+  - test: POST from loopback with the env var unset
+  - log: 2026-07-15T00:00:00Z @kj implemented (DEF-6); `test_localhost_bypass_is_opt_in` green
+  - log: 2026-09-28T13:31:45Z @kj edited importance added "CRITICAL"
+  - log: 2026-09-28T13:34:51Z @kj edited test added "POST from loopback with the env var unset"
+  - log: 2026-09-28T13:34:51Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:52Z @kj edited evidence added "test_localhost_bypass_is_opt_in green; setting defaults False in **init**.py"
+  - log: 2026-09-28T14:56:10Z @kj rejected: feature withdrawn: the bypass was a get_current_user override jupyter_server never calls, and XSRF rejected a tokenless POST regardless; repair needed an IdentityProvider subclass plus a CSRF exemption, so the code, env var, tests and README paragraph were deleted
+- [x] `ACC-IMMED-24` **Security: remote requires auth** - CRITICAL; a non-loopback request always goes through parent auth, even with the opt-in enabled
+  - evidence: no override exists any more; jupyter_server authenticates every request to ingest through @tornado.web.authenticated, and the auth gate confirms every endpoint requires authentication
+  - test-tags: FUNCTIONAL
+  - test: POST from a non-loopback address with the opt-in enabled
+  - log: 2026-07-15T00:00:00Z @kj implemented; `test_remote_ip_requires_auth` green
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "CRITICAL"
+  - log: 2026-09-28T13:34:52Z @kj edited test added "POST from a non-loopback address with the opt-in enabled"
+  - log: 2026-09-28T13:34:52Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:52Z @kj edited evidence added "test_remote_ip_requires_auth green"
+  - log: 2026-09-28T14:56:01Z @kj edited evidence "test_remote_ip_requires_auth green" -> "no override exists any more; jupyter_server authenticates every request to ingest through @tornado.web.authenticated, and the auth gate confirms every endpoint requires authentication"
+  - log: 2026-09-28T15:04:46Z @kj edited test-tags "UNIT" -> "FUNCTIONAL"
+- [x] `ACC-IMMED-25` **Security: CLI authenticates loopback only** - HIGH; the CLI attaches this host's detected token (env or another server's record) only for a loopback target, and an addressed record's own token only to the address that record names, so it works under secure-by-default including the JupyterHub loopback path
+  - evidence: _is_loopback_url gates detect_token()
+  - test-tags: UNIT
+  - test: run the CLI against an explicit loopback --url with no --token
+  - log: 2026-07-15T00:00:00Z @kj implemented (DEF-6 follow-through); scoped to loopback via host-parsed `_is_loopback_url` (DEF-12)
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "HIGH"
+  - log: 2026-09-28T13:34:52Z @kj edited test added "run the CLI against an explicit loopback --url with no --token"
+  - log: 2026-09-28T13:34:52Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:52Z @kj edited evidence added "_is_loopback_url gates detect_token()"
+  - log: 2026-09-28T23:23:43Z @kj amended text "the CLI attaches a detected token (env or running-server token) only for a loopback target (auto-detected, or an explicit `127.0.0.1`/`localhost` `--url`), so it works under secure-by-default including the JupyterHub loopback path" -> "HIGH; the CLI attaches this host's detected token (env or another server's record) only for a loopback target, and an addressed record's own token only to the address that record names, so it works under secure-by-default including the JupyterHub loopback path"
+- [x] `ACC-IMMED-26` **Security: no token leak to remote `--url`** - CRITICAL; a remote --url receives no token from this host: not the auto-detected one, not JUPYTERHUB_API_TOKEN, JPY_API_TOKEN or JUPYTER_TOKEN; a --url that matches a listed record receives that record's own token, and JUPYTERLAB_NOTIFY_TOKEN and --token are sent to any target
+  - evidence: host truth table: every remote host receives no token
+  - test-tags: UNIT
+  - test: run the CLI with a remote --url and no --token; read the headers
+  - log: 2026-07-15T00:00:00Z @kj implemented (DEF-12)
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "CRITICAL"
+  - log: 2026-09-28T13:34:52Z @kj edited test added "run the CLI with a remote --url and no --token; read the headers"
+  - log: 2026-09-28T13:34:52Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:52Z @kj edited evidence added "host truth table: every remote host receives no token"
+  - log: 2026-09-29T02:18:04Z @kj amended text "an explicit `--url` never receives the auto-detected local token; a remote server requires an explicit `--token`" -> "CRITICAL; a remote --url receives no token from this host: not the auto-detected one, not JUPYTERHUB_API_TOKEN, JPY_API_TOKEN or JUPYTER_TOKEN; a --url that matches a listed record receives that record's own token, and JUPYTERLAB_NOTIFY_TOKEN and --token are sent to any target"; reason: body stated two rules the CLI has not had since round 13: an explicit loopback --url does receive the auto-detected token, and a matched record supplies its own
+- [x] `ACC-IMMED-27` **Security: token not in URL** - HIGH; the CLI sends the token in the Authorization header only, never as a `?token=` URL param, so it does not land in server access logs
+  - evidence: URL-token branch removed; the Authorization header carries it
+  - test-tags: UNIT
+  - test: grep the outgoing request URL for token=
+  - log: 2026-07-15T00:00:00Z @kj implemented (DEF-12)
+  - log: 2026-09-28T13:31:46Z @kj edited importance added "HIGH"
+  - log: 2026-09-28T13:34:52Z @kj edited test added "grep the outgoing request URL for token="
+  - log: 2026-09-28T13:34:52Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:52Z @kj edited evidence added "URL-token branch removed; the Authorization header carries it"
+- [x] `ACC-IMMED-28` **Security: generic 500** - MEDIUM; ingest errors are logged server-side and return a generic message, no internal detail leaked
+  - evidence: body is a generic Internal server error; detail goes to self.log.exception
+  - test-tags: UNIT
+  - test: force an ingest exception and read the response body
+  - log: 2026-07-15T00:00:00Z @kj implemented (DEF-7)
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:52Z @kj edited test added "force an ingest exception and read the response body"
+  - log: 2026-09-28T13:34:53Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:53Z @kj edited evidence added "body is a generic Internal server error; detail goes to self.log.exception"
 
-## Time-Ago Indicator
+## Time-Ago Indicator `TIME`
 
 Each notification shows a relative timestamp that refreshes while visible, injected into the toast and notification-center DOM, using the server-side `createdAt`.
 
-- [x] **Relative label** - shows `just now`, `Xm ago`, `Xh ago`, `Xd ago`; anything under 60s is `just now`
-  - log: 2026-07-15 implemented (v1.2.22); jest covers `formatTimeAgo`
-- [x] **Refresh** - the label updates every 10s while the notification is visible
-  - log: 2026-07-15 implemented
-- [x] **Placement** - appears below the message when no action buttons exist, inline in `.jp-toast-buttonBar` when buttons exist
-  - log: 2026-07-15 implemented (v1.2.13)
-- [x] **Toast + center** - injected into both toast popups and the notification-center list
-  - log: 2026-07-15 implemented
-- [x] **All toast sources** - notifications from JupyterLab itself (culler, uploads, kernel) also get time-ago via the MutationObserver
-  - log: 2026-07-15 implemented (v1.2.21)
-- [x] **Authoritative timestamp** - center and toast use the server `createdAt`, so both show the same age
-  - log: 2026-07-15 implemented (v1.2.18)
-- [x] **Edge: multiline message** - messages rendered with `<br>` match via `innerText` + whitespace normalisation
-  - log: 2026-07-15 implemented (v1.2.20)
-- [x] **Edge: no cumulative duplication** - the center injector guards against re-adding time-ago (checks message and button-bar sibling), no cascading duplicates
-  - log: 2026-07-15 implemented (v1.2.15)
+- [x] `ACC-TIME-29` **Relative label** - MEDIUM; shows `just now`, `Xm ago`, `Xh ago`, `Xd ago`; anything under 60s is `just now`
+  - evidence: jest covers 0s 5s 30s 59s as just now plus the m, h and d tiers
+  - test-tags: UNIT
+  - test: call formatTimeAgo across the tier boundaries
+  - log: 2026-07-15T00:00:00Z @kj implemented (v1.2.22); jest covers `formatTimeAgo`
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:53Z @kj edited test added "call formatTimeAgo across the tier boundaries"
+  - log: 2026-09-28T13:34:53Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:53Z @kj edited evidence added "jest covers 0s 5s 30s 59s as just now plus the m, h and d tiers"
+- [x] `ACC-TIME-30` **Refresh** - MEDIUM; the label updates every 10s while the notification is visible
+  - evidence: 10s interval rewrites the label and self-clears when the notification goes
+  - test-tags: MANUAL
+  - test: watch a visible notification for one refresh interval
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:53Z @kj edited test added "watch a visible notification for one refresh interval"
+  - log: 2026-09-28T13:34:53Z @kj edited test-tags added "MANUAL"
+  - log: 2026-09-28T13:34:53Z @kj edited evidence added "10s interval rewrites the label and self-clears when the notification goes"
+- [x] `ACC-TIME-31` **Placement** - LOW; appears below the message when no action buttons exist, inline in `.jp-toast-buttonBar` when buttons exist
+  - evidence: inserted into .jp-toast-buttonBar when buttons exist, else appended below the message
+  - test-tags: MANUAL
+  - test: render one notification with action buttons and one without
+  - log: 2026-07-15T00:00:00Z @kj implemented (v1.2.13)
+  - log: 2026-09-28T13:31:48Z @kj edited importance added "LOW"
+  - log: 2026-09-28T13:34:53Z @kj edited test added "render one notification with action buttons and one without"
+  - log: 2026-09-28T13:34:53Z @kj edited test-tags added "MANUAL"
+  - log: 2026-09-28T13:34:53Z @kj edited evidence added "inserted into .jp-toast-buttonBar when buttons exist, else appended below the message"
+- [x] `ACC-TIME-32` **Toast + center** - MEDIUM; injected into both toast popups and the notification-center list
+  - evidence: injectTimeAgoIntoToast and injectTimeAgoIntoCenter both run off the MutationObserver
+  - test-tags: MANUAL
+  - test: open the notification centre while a toast is visible
+  - log: 2026-07-15T00:00:00Z @kj implemented
+  - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:53Z @kj edited test added "open the notification centre while a toast is visible"
+  - log: 2026-09-28T13:34:53Z @kj edited test-tags added "MANUAL"
+  - log: 2026-09-28T13:34:53Z @kj edited evidence added "injectTimeAgoIntoToast and injectTimeAgoIntoCenter both run off the MutationObserver"
+- [x] `ACC-TIME-33` **All toast sources** - LOW; notifications from JupyterLab itself (culler, uploads, kernel) also get time-ago via the MutationObserver
+  - evidence: the observer watches any .Toastify__toast, not only server-sourced ones
+  - test-tags: MANUAL
+  - test: trigger a culler notification and look for the label
+  - log: 2026-07-15T00:00:00Z @kj implemented (v1.2.21)
+  - log: 2026-09-28T13:31:48Z @kj edited importance added "LOW"
+  - log: 2026-09-28T13:34:54Z @kj edited test added "trigger a culler notification and look for the label"
+  - log: 2026-09-28T13:34:54Z @kj edited test-tags added "MANUAL"
+  - log: 2026-09-28T13:34:54Z @kj edited evidence added "the observer watches any .Toastify__toast, not only server-sourced ones"
+- [x] `ACC-TIME-34` **Authoritative timestamp** - MEDIUM; center and toast use the server `createdAt`, so both show the same age
+  - evidence: serverCreatedAt is keyed by notification id and read by both the toast and centre paths, so both show the same server timestamp
+  - test-tags: MANUAL
+  - test: compare the toast label against the centre label for one notification
+  - log: 2026-07-15T00:00:00Z @kj implemented (v1.2.18)
+  - log: 2026-09-28T13:31:48Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:54Z @kj edited test added "compare the toast label against the centre label for one notification"
+  - log: 2026-09-28T13:34:54Z @kj edited test-tags added "MANUAL"
+  - log: 2026-09-28T13:34:54Z @kj edited evidence added "serverCreatedAtMap supplies the server createdAt to both paths"
+  - log: 2026-09-28T14:56:01Z @kj edited evidence "serverCreatedAtMap supplies the server createdAt to both paths" -> "serverCreatedAt is keyed by notification id and read by both the toast and centre paths, so both show the same server timestamp"
+- [x] `ACC-TIME-35` **Edge: multiline message** - LOW; messages rendered with `<br>` match via `innerText` + whitespace normalisation
+  - evidence: matching no longer reads DOM text at all, so a multiline or truncated message is irrelevant; the toast is addressed by its DOM id
+  - test-tags: MANUAL
+  - test: send a message containing a newline and check the label appears
+  - log: 2026-07-15T00:00:00Z @kj implemented (v1.2.20)
+  - log: 2026-09-28T13:31:48Z @kj edited importance added "LOW"
+  - log: 2026-09-28T13:34:54Z @kj edited test added "send a message containing a newline and check the label appears"
+  - log: 2026-09-28T13:34:54Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T13:34:54Z @kj edited evidence added "innerText plus normalizeMsg match across the rendered <br>"
+  - log: 2026-09-28T14:56:01Z @kj edited evidence "innerText plus normalizeMsg match across the rendered <br>" -> "matching no longer reads DOM text at all, so a multiline or truncated message is irrelevant; the toast is addressed by its DOM id"
+  - log: 2026-09-28T15:04:23Z @kj edited test-tags "UNIT" -> "MANUAL"
+- [x] `ACC-TIME-36` **Edge: no cumulative duplication** - MEDIUM; the center injector guards against re-adding time-ago (checks message and button-bar sibling), no cascading duplicates
+  - evidence: placeTimeAgo checks the message element and its parent for an existing node before inserting, and is the single insertion point
+  - test-tags: MANUAL
+  - test: open the centre repeatedly and count .jp-toast-time-ago nodes
+  - log: 2026-07-15T00:00:00Z @kj implemented (v1.2.15)
+  - log: 2026-09-28T13:31:48Z @kj edited importance added "MEDIUM"
+  - log: 2026-09-28T13:34:54Z @kj edited test added "open the centre repeatedly and count .jp-toast-time-ago nodes"
+  - log: 2026-09-28T13:34:54Z @kj edited test-tags added "MANUAL"
+  - log: 2026-09-28T13:34:54Z @kj edited evidence added "the guard checks elParent, which covers the button-bar sibling"
+  - log: 2026-09-28T14:56:01Z @kj edited evidence "the guard checks elParent, which covers the button-bar sibling" -> "placeTimeAgo checks the message element and its parent for an existing node before inserting, and is the single insertion point"
 
-## API
+## API `API`
 
-- `POST /jupyterlab-notifications-extension/ingest` body `{message, type?, autoClose?, immediate?, actions?, data?}` -> `{success, notification_id}`; 400 missing `message` / invalid JSON, 500 generic
+- `POST /jupyterlab-notifications-extension/ingest` body `{message, type?, autoClose?, immediate?, actions?, data?}` -> `{success, notification_id}`; 400 body not a JSON object / `message` not a non-empty string / `actions` not a list / an action without a string `label` / a number anywhere that is not finite / invalid JSON, 403 unauthenticated, 500 generic
 - `GET /jupyterlab-notifications-extension/notifications` -> `{notifications: [...]}` (destructive single-consumer drain)
 - `WS /jupyterlab-notifications-extension/stream` - authenticated; server -> client only; frames are `{notifications: [<notification>]}`
-- Server setting `JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST=1` (env) opts in to token-free loopback ingest; off by default
+
+## Release `RELSE`
+
+What the next release must carry before it is published
+
+- [x] `ACC-RELSE-37` **Changelog records the removed localhost bypass setting** - HIGH; the next release section carries a Removed line for JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST; the 1.2.23 Added line stays, being true of 1.2.23, so a reader of the changelog alone now believes the setting still exists
+  - evidence: CHANGELOG.md 1.2.27 Removed section names JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST, states a token is now required from localhost too, and says the 1.2.23 Added line stays true of 1.2.23
+  - test: read CHANGELOG.md for the next version; a Removed line names the setting
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:23:12Z @kj added
+  - log: 2026-09-29T08:40:21Z @kj closed
+

@@ -5,7 +5,9 @@
  * or "3d ago". Anything under 60 seconds is shown as "just now".
  */
 export function formatTimeAgo(createdAt: number): string {
-  const delta = Math.max(0, Date.now() - createdAt);
+  // A negative delta (a future timestamp) already floors below the 60s tier,
+  // so no clamp is needed to read it as "just now".
+  const delta = Date.now() - createdAt;
   const seconds = Math.floor(delta / 1000);
 
   if (seconds < 60) {
@@ -24,10 +26,16 @@ export function formatTimeAgo(createdAt: number): string {
 }
 
 /**
- * Append a parenthesised relative-time suffix to a message string.
+ * Reconnect backoff for the notification stream, in milliseconds.
  *
- * Example: appendTimeAgo("Task done", ts) => "Task done (2m ago)"
+ * `attempt` is 1 for the first reconnect. The delay doubles from `baseMs` and
+ * is capped at `maxMs`, so a server that stays down is retried at a fixed
+ * ceiling rather than ever faster.
  */
-export function appendTimeAgo(message: string, createdAt: number): string {
-  return `${message} (${formatTimeAgo(createdAt)})`;
+export function reconnectDelay(
+  attempt: number,
+  baseMs: number,
+  maxMs: number
+): number {
+  return Math.min(baseMs * 2 ** (attempt - 1), maxMs);
 }

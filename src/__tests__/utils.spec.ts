@@ -1,4 +1,4 @@
-import { formatTimeAgo, appendTimeAgo } from '../utils';
+import { formatTimeAgo, reconnectDelay } from '../utils';
 
 describe('formatTimeAgo', () => {
   it('returns "just now" for timestamps less than 60 seconds old', () => {
@@ -26,7 +26,7 @@ describe('formatTimeAgo', () => {
     expect(formatTimeAgo(Date.now() - 365 * 86400000)).toBe('365d ago');
   });
 
-  it('handles future timestamps by clamping to "just now"', () => {
+  it('reads a future timestamp as "just now"', () => {
     expect(formatTimeAgo(Date.now() + 60000)).toBe('just now');
   });
 
@@ -36,14 +36,23 @@ describe('formatTimeAgo', () => {
   });
 });
 
-describe('appendTimeAgo', () => {
-  it('appends parenthesised time suffix to message', () => {
-    const result = appendTimeAgo('Task completed', Date.now());
-    expect(result).toBe('Task completed (just now)');
+describe('reconnectDelay', () => {
+  const BASE = 5000;
+  const MAX = 60000;
+
+  it('waits the base delay on the first reconnect', () => {
+    expect(reconnectDelay(1, BASE, MAX)).toBe(5000);
   });
 
-  it('preserves original message content', () => {
-    const result = appendTimeAgo('Server restarted', Date.now() - 120000);
-    expect(result).toBe('Server restarted (2m ago)');
+  it('doubles each attempt until the cap', () => {
+    expect(reconnectDelay(2, BASE, MAX)).toBe(10000);
+    expect(reconnectDelay(3, BASE, MAX)).toBe(20000);
+    expect(reconnectDelay(4, BASE, MAX)).toBe(40000);
+  });
+
+  it('never exceeds the cap, however many attempts', () => {
+    expect(reconnectDelay(5, BASE, MAX)).toBe(60000);
+    expect(reconnectDelay(10, BASE, MAX)).toBe(60000);
+    expect(reconnectDelay(99, BASE, MAX)).toBe(60000);
   });
 });

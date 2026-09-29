@@ -3,3 +3,58 @@
 
     https://jupyterlab.readthedocs.io/en/stable/developer/css.html
 */
+
+/*
+ * The send dialog puts its two constrained inputs inside JupyterLab's own
+ * .jp-InputDialog-inputWrapper, which is the only scope its :invalid styling
+ * has. Two values in that stylesheet do not survive the move, so they are
+ * restored here, scoped to this dialog so nothing reaches JupyterLab's own
+ * input dialogs.
+ */
+
+/*
+ * The error background is --jp-error-color3, which is the same pale pink in
+ * both themes, while the input keeps --jp-ui-font-color0, which is white in
+ * the dark theme: the value the operator has to correct measured 1.41:1
+ * against it. The background is theme-invariant, so the foreground must be
+ * too - --jp-error-color0 is #d32f2f in dark and only reaches 3.54:1.
+ *
+ * :not(:placeholder-shown) because `color` also paints the text caret. A
+ * required field showing its placeholder is already :invalid, so the field the
+ * dialog opens on drew a red insertion point with nothing yet wrong - and in
+ * the dark theme that caret measured 2.45:1 against the field, harder to find
+ * than the theme's own. The seconds field has no placeholder, so it is
+ * unaffected.
+ */
+.jp-notify-dialog
+  .jp-InputDialog-inputWrapper
+  > input.jp-mod-styled:invalid:not(:placeholder-shown) {
+  color: var(--md-red-900, #b71c1c);
+}
+
+/*
+ * A required field showing its placeholder must not look invalid, which
+ * JupyterLab expresses as `border-color: unset; background: unset`. Neither
+ * property inherits, so those compute to currentcolor and transparent: the
+ * empty message field the dialog opens on rendered as a bare black outline in
+ * the light theme and white in the dark one, louder than the title and louder
+ * than Send. These restore the ordinary appearance rather than the CSS
+ * initial, which is what "do not look invalid" means.
+ */
+.jp-notify-dialog
+  .jp-InputDialog-inputWrapper
+  > input[required].jp-mod-styled:invalid:placeholder-shown {
+  border-color: var(--jp-border-color1);
+  background: var(--jp-layout-color1);
+}
+
+/*
+ * Same rule overrode the brand-colour focus border, leaving the field that
+ * holds focus on open signalled only by its inset haze at about 1.35:1, under
+ * the 3:1 WCAG 2.2 requires of a focus indicator.
+ */
+.jp-notify-dialog
+  .jp-InputDialog-inputWrapper
+  > input[required].jp-mod-styled:invalid:placeholder-shown:focus {
+  border-color: var(--jp-brand-color1);
+}

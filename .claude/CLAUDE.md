@@ -11,17 +11,16 @@ This file extends workspace-level configuration with project-specific rules.
 
 **Architecture**:
 
-- Dual-component extension: Python server backend + TypeScript/React frontend
+- Dual-component extension: Python server backend + TypeScript frontend
 - Server extension provides REST API routes for notification management
 - Frontend extension renders notifications in JupyterLab UI
 
 **Technology Stack**:
 
-- **Python**: >= 3.9, jupyter_server >= 2.4.0
-- **TypeScript**: 5.8.0
-- **React**: 18.0.26
-- **JupyterLab**: >= 4.0.0
-- **Build**: Hatchling (Python), JupyterLab builder (frontend)
+- **Python**: >= 3.10 (required by JupyterLab 4.6), jupyter_server >= 2.21 (the tested version; JupyterLab itself needs only >= 2.19)
+- **TypeScript**: ~5.8.0
+- **JupyterLab**: >= 4.6.0
+- **Build**: Hatchling (Python), `@jupyter/builder` with rspack (frontend); webpack is absent
 - **Testing**: pytest (Python), Jest (JavaScript), Playwright (integration)
 
 **Development Workflow**:
@@ -29,7 +28,6 @@ This file extends workspace-level configuration with project-specific rules.
 - Use `jlpm` (JupyterLab's pinned yarn) for NPM operations
 - Frontend changes require rebuild: `jlpm build` or `jlpm watch` for auto-rebuild
 - Development mode: `jupyter labextension develop . --overwrite`
-- Server extension must be manually enabled: `jupyter server extension enable jupyterlab_notifications_extension`
 
 **Naming Conventions**:
 

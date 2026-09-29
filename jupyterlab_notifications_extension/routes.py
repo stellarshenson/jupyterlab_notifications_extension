@@ -11,19 +11,29 @@ from tornado.websocket import WebSocketHandler, WebSocketClosedError
 import tornado
 
 
-# Single source for the extension's URL namespace (see also request.ts)
+# The URL namespace. Three copies exist on purpose: here, src/request.ts, and
+# a third copy in cli.py, which must not import tornado to send one POST.
+# The path is a published contract, so the duplication is stable.
 API_NAMESPACE = "jupyterlab-notifications-extension"
-
-# web_app.settings key gating the localhost auth bypass (opt-in, default off)
-ALLOW_UNAUTH_LOCALHOST_SETTING = "jupyterlab_notifications_allow_unauthenticated_localhost"
 
 # Process-lifetime monotonic counter for notification ids. Guarantees a
 # unique id even across store drains (unlike len(_notification_store),
 # which resets to 0 on every fetch and could collide).
 _id_counter = itertools.count(1)
 
-# In-memory storage for notifications (broadcast to all users)
+# In-memory storage for pending notifications. Drained destructively by the
+# first client to poll - see NotificationFetchHandler - so this is a queue,
+# not a per-client mailbox.
 _notification_store: List[Dict] = []
+
+# The queue only drains when a client polls, so a server whose lab tabs are all
+# closed grows it without limit. Past this many, the oldest is dropped: the
+# frontend bounds its own two tracking structures for the same reason.
+MAX_QUEUED_NOTIFICATIONS = 500
+
+# How long a notification stays on screen when the caller does not say. The
+# frontend's send dialog and the CLI both default to the same number.
+DEFAULT_AUTO_CLOSE_MS = 5000
 
 # Live WebSocket listeners for immediate ("--now") push delivery
 _stream_listeners: Set["NotificationStreamHandler"] = set()
@@ -55,6 +65,7 @@ class NotificationIngestHandler(APIHandler):
         "type": "info",  // optional: default, info, success, warning, error, in-progress
         "autoClose": 5000,  // optional: milliseconds or false for manual dismiss
         "immediate": true,  // optional: push instantly to connected clients via WebSocket
+        "data": {},  // optional: arbitrary JSON; every number in it must be finite
         "actions": [  // optional
             {
                 "label": "Click here",
@@ -65,57 +76,79 @@ class NotificationIngestHandler(APIHandler):
     }
     """
 
-    def _is_localhost(self):
-        """Check if request is from a genuine loopback peer."""
-        return self.request.remote_ip in ('127.0.0.1', '::1')
-
-    def _allow_unauthenticated_localhost(self):
-        """Whether the operator opted in to token-free localhost ingest."""
-        return bool(self.settings.get(ALLOW_UNAUTH_LOCALHOST_SETTING, False))
-
-    def get_current_user(self):
-        """Override to optionally allow localhost without authentication.
-
-        Opt-in and secure by default: the bypass fires only when the server
-        operator explicitly enables it. Inferring trust from remote_ip alone
-        is unsafe behind a same-host reverse proxy, where every external
-        client's remote_ip is 127.0.0.1.
-        """
-        if self._allow_unauthenticated_localhost() and self._is_localhost():
-            # Return a dummy user for localhost to bypass authentication
-            return {"name": "localhost"}
-        # Otherwise use parent's authentication
-        return super().get_current_user()
 
     @tornado.web.authenticated
     def post(self):
         try:
             payload = json.loads(self.request.body.decode('utf-8'))
 
-            # Validate required fields
-            if 'message' not in payload:
+            # Validate types, not just presence. The poll fetch is a destructive
+            # drain and the frontend displays a whole batch in one loop, so a
+            # payload that throws browser-side takes every notification behind
+            # it with it - and those are then gone for good.
+            if not isinstance(payload, dict):
                 self.set_status(400)
-                self.finish(json.dumps({"error": "Missing 'message' field"}))
+                self.finish(json.dumps({"error": "Body must be a JSON object"}))
+                return
+
+            message = payload.get('message')
+            if not isinstance(message, str) or not message.strip():
+                self.set_status(400)
+                self.finish(json.dumps(
+                    {"error": "'message' must be a non-empty string"}
+                ))
+                return
+
+            # Element types matter as much as the container's: the frontend reads
+            # action.label off every element, and a non-string label makes
+            # JupyterLab's own renderer throw, which kills the tab's whole toast
+            # surface until it is reloaded.
+            actions = payload.get('actions', [])
+            if not isinstance(actions, list) or not all(
+                isinstance(action, dict) and isinstance(action.get('label'), str)
+                for action in actions
+            ):
+                self.set_status(400)
+                self.finish(json.dumps(
+                    {"error": "'actions' must be a list of objects, each with "
+                              "a string 'label'"}
+                ))
+                return
+
+            # Serialised here to fail the sender rather than the reader: the
+            # store is drained before it is serialised, so one non-finite number
+            # reaching the frontend makes JSON.parse reject the whole batch and
+            # every other sender's notification in it is lost.
+            try:
+                json.dumps(payload, allow_nan=False)
+            except ValueError:
+                self.set_status(400)
+                self.finish(json.dumps(
+                    {"error": "numbers must be finite; NaN and Infinity "
+                              "are not JSON"}
+                ))
                 return
 
             # Create notification object
             notification = {
                 "id": f"notif_{int(time.time() * 1000)}_{next(_id_counter)}",
-                "message": payload['message'],
+                "message": message,
                 "type": payload.get('type', 'info'),
-                "autoClose": payload.get('autoClose', 5000),
+                "autoClose": payload.get('autoClose', DEFAULT_AUTO_CLOSE_MS),
                 "createdAt": int(time.time() * 1000),
-                "actions": payload.get('actions', []),
+                "actions": actions,
                 "data": payload.get('data')
             }
 
-            # Add to the broadcast queue. NOTE: the poll fetch is a
+            # Add to the poll queue. NOTE: the poll fetch is a
             # destructive, single-consumer drain - the first client to poll
             # empties the queue for all clients - so queue delivery is
             # best-effort, not a per-client guarantee. Immediate ("--now")
             # notifications are additionally pushed to every currently
             # connected socket below for instant, all-tabs delivery.
             _notification_store.append(notification)
+            if len(_notification_store) > MAX_QUEUED_NOTIFICATIONS:
+                del _notification_store[:-MAX_QUEUED_NOTIFICATIONS]
 
             if payload.get('immediate'):
                 _push_immediate(notification, self.log)
@@ -125,7 +158,8 @@ class NotificationIngestHandler(APIHandler):
                 "notification_id": notification['id']
             }))
 
-        except json.JSONDecodeError:
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError,
+                ValueError):
             self.set_status(400)
             self.finish(json.dumps({"error": "Invalid JSON payload"}))
         except Exception:
@@ -143,13 +177,12 @@ class NotificationFetchHandler(APIHandler):
 
     @tornado.web.authenticated
     def get(self):
-        global _notification_store
-
         # Get all pending notifications
         notifications = _notification_store.copy()
 
-        # Clear the queue
-        _notification_store = []
+        # Cleared in place: everything else mutates this list in place, and
+        # rebinding the global would strand any reference taken across a drain.
+        _notification_store.clear()
 
         self.finish(json.dumps({"notifications": notifications}))
 

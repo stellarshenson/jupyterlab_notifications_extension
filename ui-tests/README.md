@@ -42,50 +42,17 @@ cd ..
 
 ```sh
 cd ./ui-tests
-jlpm playwright test
+JUPYTER_TEST_PORT=8899 jlpm playwright test
 ```
+
+The suite starts its own JupyterLab and does not reuse a running one, so it
+defaults to port 8888 and fails with a 120-second timeout if you already have a
+lab there. `JUPYTER_TEST_PORT` moves it to a free port.
 
 Test results will be shown in the terminal. In case of any test failures, the test report
 will be opened in your browser at the end of the tests execution; see
 [Playwright documentation](https://playwright.dev/docs/test-reporters#html-reporter)
 for configuring that behavior.
-
-## Update the tests snapshots
-
-> All commands are assumed to be executed from the root directory
-
-If you are comparing snapshots to validate your tests, you may need to update
-the reference snapshots stored in the repository. To do that, you need to:
-
-1. Compile the extension:
-
-```sh
-jlpm install
-jlpm build:prod
-```
-
-> Check the extension is installed in JupyterLab.
-
-2. Install test dependencies (needed only once):
-
-```sh
-cd ./ui-tests
-jlpm install
-jlpm playwright install
-cd ..
-```
-
-3. Execute the [Playwright](https://playwright.dev/docs/intro) command:
-
-```sh
-cd ./ui-tests
-jlpm playwright test -u
-```
-
-> Some discrepancy may occurs between the snapshots generated on your computer and
-> the one generated on the CI. To ease updating the snapshots on a PR, you can
-> type `please update playwright snapshots` to trigger the update by a bot on the CI.
-> Once the bot has computed new snapshots, it will commit them to the PR branch.
 
 ## Create tests
 

@@ -6,3 +6,10 @@ node_modules
 package-lock.json
 .claude
 jupyterlab_notifications_extension
+
+# pm-tools trackers. These are machine-written, append-only stores: a log line
+# quotes prior wording verbatim, so reformatting markdown emphasis inside one
+# rewrites the audit trail. `pm-tools check --strict` is their conformity gate.
+docs/defects*.md
+docs/acc-crit*.md
+docs/pm-hand-edits.md

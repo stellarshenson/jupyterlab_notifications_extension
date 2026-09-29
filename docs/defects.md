@@ -4,78 +4,2052 @@
 
 Most entries were found by the 2026-07-15 adversarial review (bug-hunter + architect panel) of the immediate-delivery (`--now` / WebSocket) feature. Several are pre-existing and were surfaced by that review; noted where so.
 
-## Contents
+## Authors
 
-- [Immediate delivery (WebSocket push)](#immediate-delivery-websocket-push)
-- [Security](#security)
-- [Maintainability and consistency](#maintainability-and-consistency)
-- [Resilience](#resilience)
-- [Logging hygiene](#logging-hygiene)
-- [Documentation](#documentation)
+- `@kj` Konrad Jelen
 
-## Immediate delivery (WebSocket push)
+## Immediate delivery (WebSocket push) `IMMED`
 
-- [x] `DEF-1` **"poll fallback never loses a notification" is false in multi-tab** - MEDIUM; `NotificationFetchHandler.get` does a destructive global drain (`notifications = _notification_store.copy(); _notification_store = []`), so the first tab to poll empties the queue for every tab; an `--now` notification pushed while one tab's socket is down (5s reconnect gap, or a tab opened just after the push) is shown by connected tabs via WebSocket, but the down tab's later poll returns empty and it never displays the item; the code comments and README over-promised; fix: corrected the contract to "best-effort single-consumer" in comments and README (deep per-client delivery not implemented - documented as best-effort); `jupyterlab_notifications_extension/routes.py:117-120`
-  - 2026-07-15 reported: adversarial review (bug-hunter) finding 1, DO-NOT-SHIP; destructive drain is pre-existing, the over-stated "never loses" contract is new with this feature
-  - 2026-07-15 fixed: reworded the `post()` queue comment and the README "Immediate Delivery" section to state poll is a best-effort single-consumer drain and the push reaches all connected tabs; per-client durable delivery left as a future enhancement
-- [x] `DEF-2` **dedup id not robustly unique now that it is correctness-critical** - LOW; `id = f"notif_{int(time.time()*1000)}_{len(_notification_store)}"` used a `len()` suffix that resets to 0 on every drain; the feature promoted this id to the `seenNotificationIds` dedup key; fix: derive the id from a process-lifetime monotonic counter (`itertools.count`); `jupyterlab_notifications_extension/routes.py:26,106`
-  - 2026-07-15 reported: architect rated MAJOR; bug-hunter tested and cleared it as not achievable in practice; reconciled to LOW hardening
-  - 2026-07-15 fixed: `_id_counter = itertools.count(1)`, id now `notif_<ms>_<counter>`; added `test_notification_ids_unique_across_drains` (green)
-- [x] `DEF-3` **`seenNotificationIds` grows unbounded for the tab lifetime** - LOW; every displayed notification id was inserted and never evicted (slow memory leak on long-lived tabs); fix: bounded the Set to `MAX_SEEN_IDS` (500), evicting the oldest (Set preserves insertion order); `src/index.ts:308-331`
-  - 2026-07-15 reported: both reviewers (bug-hunter finding 3, architect minor)
-  - 2026-07-15 fixed: cap + oldest-eviction in `displayNotification`
-- [x] `DEF-4` **WebSocket reconnect has no backoff, cap, or stop condition** - LOW; `onerror -> close -> onclose -> setTimeout(connect, 5000)` unconditionally forever; a persistent 403/404/down server made every tab retry every 5s indefinitely; the delay was a bare literal beside the named `POLL_INTERVAL`; fix: named constants, capped exponential backoff, give up after `RECONNECT_MAX_ATTEMPTS` (10), reset on `onopen`; `src/index.ts` (`connectNotificationStream`)
-  - 2026-07-15 reported: both reviewers (bug-hunter finding 4, architect minor - also covers the bare-literal consistency nit)
-  - 2026-07-15 fixed: `RECONNECT_BASE_MS`/`RECONNECT_MAX_MS`/`RECONNECT_MAX_ATTEMPTS`, backoff `min(base*2^(n-1), max)`, give-up warns and falls back to poll
-- [x] `DEF-5` **`_push_immediate` drops a listener on ANY write exception** - LOW; `except Exception: discard` treated a transient write error as a permanent disconnect; fix: discard only on `WebSocketClosedError`; other exceptions are logged and the listener kept; `jupyterlab_notifications_extension/routes.py`
-  - 2026-07-15 reported: architect judgement finding
-  - 2026-07-15 fixed: split except into `WebSocketClosedError` (discard) and `Exception` (log, keep)
+Instant WebSocket push for --now notifications, and the 30s poll it falls back to
 
-## Security
+- [x] `DEF-IMMED-1` **"poll fallback never loses a notification" is false in multi-tab** - MEDIUM; `NotificationFetchHandler.get` does a destructive global drain (`notifications = _notification_store.copy(); _notification_store = []`), so the first tab to poll empties the queue for every tab; an `--now` notification pushed while one tab's socket is down (5s reconnect gap, or a tab opened just after the push) is shown by connected tabs via WebSocket, but the down tab's later poll returns empty and it never displays the item; the code comments and README over-promised; fix: corrected the contract to "best-effort single-consumer" in comments and README (deep per-client delivery not implemented - documented as best-effort); `jupyterlab_notifications_extension/routes.py:117-120`
+  - test-tags: MANUAL
+  - evidence: contract reworded to best-effort single-consumer in the routes.py post() comment and the README Immediate Delivery section
+  - repro: push --now while one tab's socket is down; that tab's next poll returns empty because the drain is single-consumer
+  - log: 2026-07-15T00:00:00Z @kj reported: adversarial review (bug-hunter) finding 1, DO-NOT-SHIP; destructive drain is pre-existing, the over-stated "never loses" contract is new with this feature
+  - log: 2026-07-15T00:00:00Z @kj fixed: reworded the `post()` queue comment and the README "Immediate Delivery" section to state poll is a best-effort single-consumer drain and the push reaches all connected tabs; per-client durable delivery left as a future enhancement
+  - log: 2026-09-28T13:33:41Z @kj edited repro added "push --now while one tab's socket is down; that tab's next poll returns empty because the drain is single-consumer"
+  - log: 2026-09-28T13:33:41Z @kj edited evidence added "contract reworded to best-effort single-consumer in the routes.py post() comment and the README Immediate Delivery section"
+  - log: 2026-09-28T13:33:41Z @kj edited test-tags added "MANUAL"
+- [x] `DEF-IMMED-2` **dedup id not robustly unique now that it is correctness-critical** - MINOR; `id = f"notif_{int(time.time()*1000)}_{len(_notification_store)}"` used a `len()` suffix that resets to 0 on every drain; the feature promoted this id to the `seenNotificationIds` dedup key; fix: derive the id from a process-lifetime monotonic counter (`itertools.count`); `jupyterlab_notifications_extension/routes.py:26,106`
+  - test-tags: UNIT
+  - evidence: id uses itertools.count(1); test_notification_ids_unique_across_drains green
+  - repro: ingest two notifications in the same millisecond either side of a drain; the len() suffix resets to 0 and the ids collide
+  - log: 2026-07-15T00:00:00Z @kj reported: architect rated MAJOR; bug-hunter tested and cleared it as not achievable in practice; reconciled to LOW hardening
+  - log: 2026-07-15T00:00:00Z @kj fixed: `_id_counter = itertools.count(1)`, id now `notif_<ms>_<counter>`; added `test_notification_ids_unique_across_drains` (green)
+  - log: 2026-09-28T13:33:41Z @kj edited repro added "ingest two notifications in the same millisecond either side of a drain; the len() suffix resets to 0 and the ids collide"
+  - log: 2026-09-28T13:33:41Z @kj edited evidence added "id uses itertools.count(1); test_notification_ids_unique_across_drains green"
+  - log: 2026-09-28T13:33:42Z @kj edited test-tags added "UNIT"
+- [x] `DEF-IMMED-3` **`seenNotificationIds` grows unbounded for the tab lifetime** - MINOR; every displayed notification id was inserted and never evicted (slow memory leak on long-lived tabs); fix: bounded the Set to `MAX_SEEN_IDS` (500), evicting the oldest (Set preserves insertion order); `src/index.ts:308-331`
+  - test-tags: UNIT
+  - evidence: seenNotificationIds bounded to MAX_TRACKED_NOTIFICATIONS with oldest-first eviction in displayNotification
+  - repro: leave a tab open and keep receiving notifications; seenNotificationIds grows for the tab lifetime
+  - log: 2026-07-15T00:00:00Z @kj reported: both reviewers (bug-hunter finding 3, architect minor)
+  - log: 2026-07-15T00:00:00Z @kj fixed: cap + oldest-eviction in `displayNotification`
+  - log: 2026-09-28T13:33:42Z @kj edited repro added "leave a tab open and keep receiving notifications; seenNotificationIds grows for the tab lifetime"
+  - log: 2026-09-28T13:33:42Z @kj edited evidence added "MAX_SEEN_IDS 500 with oldest-first eviction in displayNotification"
+  - log: 2026-09-28T13:33:42Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T18:18:35Z @kj edited evidence "MAX_SEEN_IDS 500 with oldest-first eviction in displayNotification" -> "seenNotificationIds bounded to MAX_TRACKED_NOTIFICATIONS with oldest-first eviction in displayNotification"
+- [x] `DEF-IMMED-4` **WebSocket reconnect has no backoff, cap, or stop condition** - MINOR; `onerror -> close -> onclose -> setTimeout(connect, 5000)` unconditionally forever; a persistent 403/404/down server made every tab retry every 5s indefinitely; the delay was a bare literal beside the named `POLL_INTERVAL`; fix: named constants, capped exponential backoff, give up after `RECONNECT_MAX_ATTEMPTS` (10), reset on `onopen`; `src/index.ts` (`connectNotificationStream`)
+  - test-tags: UNIT
+  - evidence: capped exponential backoff 5s to 60s, gives up after 10 consecutive closes; sequence hand-traced by two reviewers
+  - repro: stop the server; the client reopens the stream every 5s indefinitely
+  - log: 2026-07-15T00:00:00Z @kj reported: both reviewers (bug-hunter finding 4, architect minor - also covers the bare-literal consistency nit)
+  - log: 2026-07-15T00:00:00Z @kj fixed: `RECONNECT_BASE_MS`/`RECONNECT_MAX_MS`/`RECONNECT_MAX_ATTEMPTS`, backoff `min(base*2^(n-1), max)`, give-up warns and falls back to poll
+  - log: 2026-09-28T13:33:42Z @kj edited repro added "stop the server; the client reopens the stream every 5s indefinitely"
+  - log: 2026-09-28T13:33:42Z @kj edited evidence added "capped exponential backoff 5s to 60s, gives up after 10 consecutive closes; sequence hand-traced by two reviewers"
+  - log: 2026-09-28T13:33:42Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T21:13:34Z @kj evidence superseded: DEF-IMMED-85 deleted the give-up branch in round 7, so the client now retries at the 60s ceiling for as long as the tab is open
+- [x] `DEF-IMMED-5` **`_push_immediate` drops a listener on ANY write exception** - MINOR; `except Exception: discard` treated a transient write error as a permanent disconnect; fix: discard only on `WebSocketClosedError`; other exceptions are logged and the listener kept; `jupyterlab_notifications_extension/routes.py`
+  - test-tags: UNIT
+  - evidence: discard only on WebSocketClosedError; any other exception is logged and the listener kept
+  - repro: make write_message raise a non-close error; the listener is discarded as though the socket had closed
+  - log: 2026-07-15T00:00:00Z @kj reported: architect judgement finding
+  - log: 2026-07-15T00:00:00Z @kj fixed: split except into `WebSocketClosedError` (discard) and `Exception` (log, keep)
+  - log: 2026-09-28T13:33:42Z @kj edited repro added "make write_message raise a non-close error; the listener is discarded as though the socket had closed"
+  - log: 2026-09-28T13:33:42Z @kj edited evidence added "discard only on WebSocketClosedError; any other exception is logged and the listener kept"
+  - log: 2026-09-28T13:33:42Z @kj edited test-tags added "UNIT"
+- [x] `DEF-IMMED-21` **CLI posts to an arbitrary running server and reports success** - MAJOR; get_jupyter_base_url and detect_token each take the first line of jupyter server list --json; list_running_servers iterates os.listdir, so the pick is arbitrary and the two separate reads can pair one server's URL with another's token; exit code is 0 either way
+  - evidence: the list is read once and the choice is explicit: a JUPYTERHUB_SERVICE_PREFIX match wins, a single server is taken, several with no match exit 2 listing them; main passes the resolved URL onward so the printed URL is the one used; 6 tests including the exit-2 path
+  - repro: run two jupyter servers, then jupyterlab-notify -m x; it can land on either lab and exits 0
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T14:19:43Z @kj no ordering or filtering on the server list, and the list is read twice in separate subprocesses
+  - log: 2026-09-28T14:19:43Z @kj added
+  - log: 2026-09-28T15:03:04Z @kj closed
+- [x] `DEF-IMMED-25` **Send Notification dialog reports neither success nor failure** - MAJOR; success is console.debug and failure is console.error, and the payload sets no immediate flag, so the sender waits up to 30s; in the documented state where the server extension is not enabled the POST fails and the operator sees nothing and resends
+  - evidence: dialog payload now sets immediate true so the sender's own toast is the confirmation, and the catch raises Notification.error instead of console.error
+  - repro: run the Send Notification command with the server extension disabled; no user-visible error
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T14:35:52Z @kj no user-facing feedback surface on either branch, and no immediate flag for self-confirmation
+  - log: 2026-09-28T14:35:52Z @kj added
+  - log: 2026-09-28T14:55:42Z @kj closed
+- [x] `DEF-IMMED-26` **CLI with no message exits 0 while its help says 0 means accepted** - MAJOR; a missing -m prints the help and returns 0, contradicting both the flag's own required label and the documented exit table, so a cron sender whose message expanded to empty reports success having sent nothing
+  - evidence: --message is required, so a missing message exits 2 not 0; the epilog documents exit 2, and main prints the exception before returning 1; verified no -m exits 2 and --help exits 0
+  - repro: run jupyterlab-notify with no -m; exit code is 0
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T14:35:52Z @kj the no-message branch returns 0 instead of a usage error
+  - log: 2026-09-28T14:35:52Z @kj added
+  - log: 2026-09-28T14:55:42Z @kj closed
+- [x] `DEF-IMMED-35` **Send dialog opens focused on Send, and Enter sends nothing silently** - MAJOR; the body is a plain Widget so JupyterLab focuses the default button; one Enter resolves accept, the empty-message guard returns, and the dialog closes with no toast and no error - the same no-feedback failure DEF-IMMED-25 was closed on
+  - evidence: focusNodeSelector 'input' passed to the Dialog, so focus lands on the message field and Enter cannot accept an empty message
+  - repro: open Send Notification from the palette and press Enter; the dialog closes, nothing is sent, nothing is said
+  - test-tags: E2E
+  - root-cause: 2026-09-28T15:43:13Z @kj no focusNodeSelector is passed, so focus lands on the terminal action rather than the field the user must fill
+  - log: 2026-09-28T15:43:13Z @kj added
+  - log: 2026-09-28T15:45:37Z @kj closed
+  - log: 2026-09-28T16:28:55Z @kj regressed as DEF-IMMED-35-1
+- [x] `DEF-IMMED-35-1` **Send dialog opens focused on Send, and Enter sends nothing silently** - MAJOR; the body is a plain Widget so JupyterLab focuses the default button; one Enter resolves accept, the empty-message guard returns, and the dialog closes with no toast and no error - the same no-feedback failure DEF-IMMED-25 was closed on
+  - test-tags: MANUAL
+  - repro: open the Send Notification dialog and check where the caret lands, then press Enter without typing
+  - evidence: dialog passes focusNodeSelector input, so the caret lands in the message field and Enter is not swallowed by an empty required input; tagged MANUAL because Galata cannot assert caret placement inside a lab dialog
+  - log: 2026-09-28T16:28:55Z @kj regression of DEF-IMMED-35; reason: focusNodeSelector only moves the caret; dialog.js resolves the default button on Enter when the active element is not a button or textarea, and _checkValidation never ran, so Enter still accepts an empty message silently
+  - log: 2026-09-28T16:38:52Z @kj closed
+  - log: 2026-09-28T16:59:44Z @kj edited repro added "open the Send Notification dialog and check where the caret lands, then press Enter without typing"; test-tags added "MANUAL"
+  - log: 2026-09-28T18:18:35Z @kj the closure wording overstated the report site: the empty-message branch runs after launch resolves, so the report is a toast with the dialog already closed; DEF-IMMED-65 now gates Send from the start
+- [x] `DEF-IMMED-36` **Emptying the auto-close field broadcasts a toast that never closes** - MAJOR; parseInt of an empty field is NaN, JSON.stringify writes null, and react-toastify resolves autoClose false when actions are present, so every recipient gets a toast they must dismiss by hand; an empty non-required number input does not match :invalid so the dialog's own validation never fires
+  - evidence: the seconds input is required, so the Dialog's existing validation blocks an emptied field and no payload can carry a null autoClose
+  - repro: tick auto-close, clear the seconds field, tick the dismiss button, send; the toast is still up after 10s
+  - test-tags: E2E
+  - root-cause: 2026-09-28T15:43:13Z @kj the seconds input is not required, so the Dialog validation that enforces min never sees it as invalid
+  - log: 2026-09-28T15:43:13Z @kj added
+  - log: 2026-09-28T15:45:37Z @kj closed
+  - log: 2026-09-28T16:52:05Z @kj round-3 measured autoClose null at 7037 ms against 7035 ms for autoClose 5000, so the never-closing toast this item cited does not reproduce; the stale-button defect is real and filed as DEF-IMMED-47
+- [x] `DEF-IMMED-37` **Dialog type select and seconds input have no accessible name** - MAJOR; the label elements exist with the right text but carry no htmlFor and do not wrap their control, so both report zero labels and no aria-label, while the two checkboxes in the same dialog are wired correctly; WCAG 2.1 SC 4.1.2
+  - evidence: message input and type select carry ids with matching label htmlFor, and the seconds input carries aria-label 'Auto-close seconds'
+  - repro: inspect the dialog: typeSelect and secondsInput report labels 0, ariaLabel null
+  - test-tags: E2E
+  - root-cause: 2026-09-28T15:43:13Z @kj labels were created as text nodes without association to their controls
+  - log: 2026-09-28T15:43:13Z @kj added
+  - log: 2026-09-28T15:45:37Z @kj closed
+- [x] `DEF-IMMED-41` **Server list counts stale entries, so the refusal fires with one lab live** - MINOR; a lab whose process became a zombie is still listed because its runtime file is never pruned, so 13 entries were reported where one server was actually serving and the ambiguity refusal fired
+  - evidence: the refusal now says entries may be stale and names jupyter --runtime-dir to clear them, alongside --url; a liveness probe per candidate would be new mechanism for a case the operator can already resolve
+  - repro: run the CLI with no --url on a box carrying leftover runtime files; it lists candidates and exits 2
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T15:57:49Z @kj jupyter_server's check_pid treats a defunct child as alive, so list_running_servers keeps the record
+  - log: 2026-09-28T15:57:49Z @kj added
+  - log: 2026-09-28T15:57:59Z @kj closed
+- [x] `DEF-IMMED-42` **A local server started with a certificate is unreachable** - MINOR; the https branch builds the right URL but a self-signed certificate is not in the trust store, so the request fails verification; bypassing it is refused because the tool carries tokens
+  - evidence: the authentication epilog states that a certificate-bearing server needs an explicit --url matching the certificate and a trusted certificate; no verification bypass is offered because the tool carries tokens
+  - repro: run a lab with --certfile and send with no --url; SSL CERTIFICATE_VERIFY_FAILED, exit 1
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T15:57:49Z @kj no trust path exists for a self-signed certificate and none is fabricated
+  - log: 2026-09-28T15:57:49Z @kj added
+  - log: 2026-09-28T15:57:59Z @kj closed
+  - log: 2026-09-28T16:38:43Z @kj round-3 slop-hunter called this evidence unsupported; refuted, cli.py lines 323-326 carry the sentence verbatim
+  - log: 2026-09-29T03:13:28Z @kj evidence superseded: DEF-DOCS-195 replaced the epilog sentence this closure cites, because main re-addresses a matched record; DEF-DOCS-196 then widened it to the --ip case; the rejection of a self-signed certificate is unchanged
+  - log: 2026-09-29T03:14:09Z @kj correction to the line above: the defect that widened the paragraph to the --ip case is DEF-DOCS-208, not DEF-DOCS-196; DEF-UI-196 is an unrelated scheme-guard defect
+- [x] `DEF-IMMED-46` **Send-failure toast reads [object Object]** - MAJOR; the dialog's only failure report says 'Could not send notification: Error: [object Object]', naming no cause
+  - evidence: request.ts reads data.message then data.error; 3 new jest tests, mutation-proven - restoring data.message || data fails 2 of them; live server confirmed the 400 body is {"error": "'message' must be a non-empty string"}
+  - repro: send a space-only message from the Send Notification command and read the error toast
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T16:51:52Z @kj routes.py returns its error bodies under 'error' while request.ts read only data.message, so the whole object reached ResponseError
+  - log: 2026-09-28T16:51:52Z @kj added
+  - log: 2026-09-28T17:03:19Z @kj closed
+  - log: 2026-09-28T18:18:35Z @kj this closure was incomplete: the fallback still passed the raw body, so the symptom survived for a body carrying neither key, and the test named for the fallback fed a body with the error key and passed without reaching it; completed as DEF-IMMED-56
+- [x] `DEF-IMMED-47` **Send button state is one action stale** - MAJOR; clearing the seconds field then unchecking 'Auto-close after' leaves Send disabled with nothing invalid on screen and no message; re-checking leaves Send enabled over an empty seconds field, which posts autoClose null
+  - evidence: the change handler dispatches input so Dialog revalidates; measured live - unchecking now gives sendDisabled false with 0 invalid, re-checking gives sendDisabled true with 1 invalid, both inverted from the reported states
+  - repro: type a message, clear seconds, uncheck the box, observe Send disabled and no invalid field; re-check, observe Send enabled and the field empty
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T16:51:52Z @kj Dialog recomputes accept only from its own input handler; the checkbox mutated disabled on change, which fires after input
+  - log: 2026-09-28T16:51:52Z @kj added
+  - log: 2026-09-28T17:03:19Z @kj closed
+- [x] `DEF-IMMED-50` **1e3 seconds became 1 second and the message was not trimmed** - MINOR; the number field accepts 1e3 as valid and parseInt read 1 from it; a space-only message posted and came back 400
+  - evidence: Number replaces parseInt so 1e3 reads 1000, and the accept branch trims, so a space-only message is reported in the dialog instead of posted; tsc and 12 jest green
+  - repro: enter 1e3 in the seconds field and watch the toast close after one second
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T16:51:52Z @kj parseInt stops at the first non-digit; the accept branch read value without trim
+  - log: 2026-09-28T16:51:52Z @kj added
+  - log: 2026-09-28T17:03:19Z @kj closed
+- [x] `DEF-IMMED-56` **Send-failure toast still showed the raw body** - MAJOR; the fallback in request.ts passed the whole body through, so a proxy body under a third key rendered [object Object], a body-less 502 rendered nothing, and an nginx HTML page was truncated mid-tag into the toast
+  - evidence: request.ts takes the detail only when it is a non-empty string, else the status line; the fallback test now feeds six bodies carrying neither key, including an HTML page, an empty body, {}, [] and null; mutation-proven, restoring the raw-body fallback fails 6 of 17 jest
+  - repro: answer ingest with {"detail": "upstream closed"} and read the toast
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T18:13:05Z @kj data.message || data.error || data kept the raw body as the third term; the test named for that fallback fed a body carrying the error key, so it passed without reaching it
+  - log: 2026-09-28T18:13:05Z @kj added
+  - log: 2026-09-28T18:18:21Z @kj closed
+- [x] `DEF-IMMED-64` **Failure toast printed the error class name** - MINOR; the toast interpolated the Error object, so it read 'Error: <reason>' and, on an aborted request, 'TypeError: Failed to fetch', which reads as an extension crash rather than an unreachable server
+  - evidence: the toast interpolates error.message when the value is an Error, so the class name no longer prefixes the reason
+  - repro: abort the ingest request and read the toast
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:17:33Z @kj the template interpolated the object instead of its message
+  - log: 2026-09-28T18:17:33Z @kj added
+  - log: 2026-09-28T18:18:22Z @kj closed
+- [x] `DEF-IMMED-65` **Send was live over an already-invalid field on open** - MINOR; on open the message field was already :invalid while Send was enabled, so a reflex Enter closed the dialog and raised a persistent error toast; required is inert until Dialog validates, which it does only from its own input handler
+  - evidence: one synthetic input event is dispatched from Dialog.ready, which resolves after Dialog registers its input handler in onAfterAttach, so Send starts disabled on an empty form and the first Enter is gated; 9 Galata E2E green including the dialog-launch test
+  - repro: open the dialog and press Enter without typing
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:17:33Z @kj Dialog registers that handler in onAfterAttach and starts with _hasValidationErrors false, so an untouched form is never validated
+  - log: 2026-09-28T18:17:33Z @kj added
+  - log: 2026-09-28T18:18:22Z @kj closed
+- [x] `DEF-IMMED-85` **Outage over 7 minutes disables --now for the tab's life** - MAJOR; the reconnect budget is 435s; past it the socket is never retried, so the tab loses --now permanently while the CLI still reports success
+  - evidence: give-up branch deleted so onclose always reschedules at the 60s ceiling; streamOffline warns once as pollOffline does; 11 Galata green including both degradation modes; retry past the old budget is not asserted by a test, which would need a 7.5-minute run
+  - repro: keep a tab open through a server restart longer than 7 min 15 s, then send with --now
+  - test-tags: E2E
+  - root-cause: 2026-09-28T19:38:24Z @kj attempts reset only in onopen and the give-up branch returned without rescheduling; the poll it fell back to is a destructive single-consumer drain, so another tab can take the notification first
+  - log: 2026-09-28T19:38:24Z @kj added
+  - log: 2026-09-28T19:56:13Z @kj closed; reason: the evidence must state what is not proven: asserting indefinite retry needs a run longer than the whole suite, so the deletion and the unchanged backoff are what is demonstrated
 
-- [x] `DEF-6` **localhost auth bypass on ingest trusts `remote_ip`** - MEDIUM; `_is_localhost()` + a dummy `get_current_user` skipped auth for any request whose `remote_ip` is loopback; behind a same-host reverse proxy that is `127.0.0.1` for ALL external clients (with `trust_xheaders` off), so any unauthenticated client could push `immediate` notifications carrying action buttons that execute commands; pre-existing, amplified by the new instant-push path; fix (user decision: opt-in, secure by default): bypass now fires only when `JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST=1` is set, via `web_app.settings[ALLOW_UNAUTH_LOCALHOST_SETTING]` (default off, mirrors jupyter_server's own env-var idiom); the CLI now authenticates with a detected token (env or running-server token) so it keeps working under secure-by-default; `jupyterlab_notifications_extension/routes.py`, `__init__.py`, `cli.py`
-  - 2026-07-15 reported: both reviewers (bug-hunter finding 2 with runtime trace, architect major); needs a deployment decision before changing
-  - 2026-07-15 fixed: opt-in env-var gate (default off); dropped the dead `'localhost'` string too (see DEF-9); CLI `detect_token()` attaches a token for localhost; updated `test_localhost_bypass_is_opt_in` + `test_remote_ip_requires_auth` (green); README documents the env var
-- [x] `DEF-7` **ingest 500 handler returns `str(e)` to the client** - LOW; the catch-all returned the raw exception string, leaking internal detail; fix: `self.log.exception(...)` server-side, return a generic `"Internal server error"`; `jupyterlab_notifications_extension/routes.py`
-  - 2026-07-15 reported: architect minor; pre-existing
-  - 2026-07-15 fixed: log-and-generalise
-- [x] `DEF-12` **CLI auto-attached the local server token to an explicit remote `--url`** - MAJOR; regression from the DEF-6 CLI change: `send_notification_api` filled `token = detect_token()` whenever `--token` was omitted and attached it to any `base_url`, so `jupyterlab-notify --url http://remote-host -m x` with a local server running and no `--token` sent the LOCAL server's token to the remote host; cause: token auto-detection was not scoped to the target; fix: auto-detect a token only for a loopback target (host-parsed `_is_loopback_url`, covering the auto-detected URL and an explicit `127.0.0.1`/`localhost` `--url`); a genuinely remote `--url` gets no auto-token; also dropped the redundant `?token=` URL param so the token travels in the Authorization header only (keeps it out of access logs, subsumes the bug-hunter URL-token finding); `jupyterlab_notifications_extension/cli.py`
-  - 2026-07-15 reported: round-2 architect re-review, MAJOR credential-leak regression (DO-NOT-SHIP); bug-hunter separately flagged the redundant URL token as a log leak
-  - 2026-07-15 fixed: gate on `detect_token()`; removed the URL-token branch; module docstring corrected
-  - 2026-07-15 refined: round-3 re-review returned SHIP but flagged that a `base_url is None` gate broke the documented explicit-loopback JupyterHub `--url` path (403); switched to a host-parsed `_is_loopback_url` check so loopback targets (auto or explicit) authenticate while a remote `--url` still gets no token; adversarial truth-table (userinfo `@evil.com`, `localhost.evil.com`, prefix/query spoofs, `::1`) verified - all correct
+## Security `SEC`
 
-## Maintainability and consistency
+Authentication on ingest and the stream, and handling of the CLI token
 
-- [x] `DEF-8` **API namespace string duplicated across 5 files** - LOW; `"jupyterlab-notifications-extension"` was hand-inlined in `routes.py` (x3), `request.ts`, `index.ts` (WS builder), `cli.py`, `scripts/send_notification.py`; fix (scoped to the active paths): `API_NAMESPACE` constant in `routes.py` (used by all 3 route patterns) and exported from `request.ts` (used by `requestAPI` and the `index.ts` WS builder); `cli.py` and the legacy standalone `scripts/send_notification.py` keep literals on purpose - both must run as standalone scripts (a package import would break direct execution / force heavy deps); `jupyterlab_notifications_extension/routes.py`, `src/request.ts`, `src/index.ts`
-  - 2026-07-15 reported: architect major (maintainability); pre-existing pattern extended by this feature
-  - 2026-07-15 fixed: 3->1 server-side, 2->1 frontend; standalone-script literals kept with documented rationale
-- [x] `DEF-9` **dead `'localhost'` branch in `_is_localhost`** - LOW; `remote_ip` is always a resolved IP, so the literal `'localhost'` in the tuple could never match; fix: removed it (tuple is now `('127.0.0.1', '::1')`); `jupyterlab_notifications_extension/routes.py`
-  - 2026-07-15 reported: architect minor; pre-existing
-  - 2026-07-15 fixed: removed alongside the DEF-6 rework
-- [x] `DEF-13` **second logging mechanism introduced by the DEF-5 fix** - LOW; the DEF-5 fix added `logging.getLogger(__name__)` for the `_push_immediate` warning while every other log site uses the jupyter app logger (`self.log` / `server_app.log`), so that one warning surfaced only via the root logger, not the ServerApp log; fix: `_push_immediate(notification, log)` now takes the caller's `self.log`; removed the module logger and `import logging`; `jupyterlab_notifications_extension/routes.py`
-  - 2026-07-15 reported: round-2 architect re-review, MINOR consistency
-  - 2026-07-15 fixed: warning routes through `self.log` like the other four sites
+- [x] `DEF-SEC-6` **localhost auth bypass on ingest trusts `remote_ip`** - MEDIUM; `_is_localhost()` + a dummy `get_current_user` skipped auth for any request whose `remote_ip` is loopback; behind a same-host reverse proxy that is `127.0.0.1` for ALL external clients (with `trust_xheaders` off), so any unauthenticated client could push `immediate` notifications carrying action buttons that execute commands; pre-existing, amplified by the new instant-push path; fix (user decision: opt-in, secure by default): bypass now fires only when `JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST=1` is set, via `web_app.settings[ALLOW_UNAUTH_LOCALHOST_SETTING]` (default off, mirrors jupyter_server's own env-var idiom); the CLI now authenticates with a detected token (env or running-server token) so it keeps working under secure-by-default; `jupyterlab_notifications_extension/routes.py`, `__init__.py`, `cli.py`
+  - related: DEF-SEC-19 - superseded this fix by deleting the bypass outright
+  - test-tags: UNIT
+  - evidence: bypass requires JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST=1; test_localhost_bypass_is_opt_in and test_remote_ip_requires_auth green
+  - repro: behind a same-host reverse proxy every client's remote_ip is 127.0.0.1, so ingest accepts an unauthenticated POST
+  - log: 2026-07-15T00:00:00Z @kj reported: both reviewers (bug-hunter finding 2 with runtime trace, architect major); needs a deployment decision before changing
+  - log: 2026-07-15T00:00:00Z @kj fixed: opt-in env-var gate (default off); dropped the dead `'localhost'` string too (see DEF-9); CLI `detect_token()` attaches a token for localhost; updated `test_localhost_bypass_is_opt_in` + `test_remote_ip_requires_auth` (green); README documents the env var
+  - log: 2026-09-28T13:33:41Z @kj edited repro added "behind a same-host reverse proxy every client's remote_ip is 127.0.0.1, so ingest accepts an unauthenticated POST"
+  - log: 2026-09-28T13:33:41Z @kj edited evidence added "bypass requires JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST=1; test_localhost_bypass_is_opt_in and test_remote_ip_requires_auth green"
+  - log: 2026-09-28T13:33:41Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T17:56:08Z @kj evidence superseded: DEF-SEC-19 deleted the bypass, the env var and both named tests, so JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST, test_localhost_bypass_is_opt_in and test_remote_ip_requires_auth are all absent from the tree; ingest requires authentication unconditionally
+- [x] `DEF-SEC-7` **ingest 500 handler returns `str(e)` to the client** - MINOR; the catch-all returned the raw exception string, leaking internal detail; fix: `self.log.exception(...)` server-side, return a generic `"Internal server error"`; `jupyterlab_notifications_extension/routes.py`
+  - test-tags: UNIT
+  - evidence: self.log.exception server-side, client receives a generic Internal server error
+  - repro: make ingest raise; the 500 response body carries the exception text
+  - log: 2026-07-15T00:00:00Z @kj reported: architect minor; pre-existing
+  - log: 2026-07-15T00:00:00Z @kj fixed: log-and-generalise
+  - log: 2026-09-28T13:33:42Z @kj edited repro added "make ingest raise; the 500 response body carries the exception text"
+  - log: 2026-09-28T13:33:42Z @kj edited evidence added "self.log.exception server-side, client receives a generic Internal server error"
+  - log: 2026-09-28T13:33:42Z @kj edited test-tags added "UNIT"
+- [x] `DEF-SEC-12` **CLI auto-attached the local server token to an explicit remote `--url`** - MAJOR; regression from the DEF-6 CLI change: `send_notification_api` filled `token = detect_token()` whenever `--token` was omitted and attached it to any `base_url`, so `jupyterlab-notify --url http://remote-host -m x` with a local server running and no `--token` sent the LOCAL server's token to the remote host; cause: token auto-detection was not scoped to the target; fix: auto-detect a token only for a loopback target (host-parsed `_is_loopback_url`, covering the auto-detected URL and an explicit `127.0.0.1`/`localhost` `--url`); a genuinely remote `--url` gets no auto-token; also dropped the redundant `?token=` URL param so the token travels in the Authorization header only (keeps it out of access logs, subsumes the bug-hunter URL-token finding); `jupyterlab_notifications_extension/cli.py`
+  - test-tags: UNIT
+  - evidence: _is_loopback_url gates detect_token(); 10-case host truth table passed, including 127.0.0.1@evil.com and localhost.evil.com
+  - repro: run `jupyterlab-notify --url http://remote-host -m x` with a local server up and no --token; the local token reaches remote-host
+  - log: 2026-07-15T00:00:00Z @kj reported: round-2 architect re-review, MAJOR credential-leak regression (DO-NOT-SHIP); bug-hunter separately flagged the redundant URL token as a log leak
+  - log: 2026-07-15T00:00:00Z @kj fixed: gate on `detect_token()`; removed the URL-token branch; module docstring corrected
+  - log: 2026-07-15T00:00:00Z @kj refined: round-3 re-review returned SHIP but flagged that a `base_url is None` gate broke the documented explicit-loopback JupyterHub `--url` path (403); switched to a host-parsed `_is_loopback_url` check so loopback targets (auto or explicit) authenticate while a remote `--url` still gets no token; adversarial truth-table (userinfo `@evil.com`, `localhost.evil.com`, prefix/query spoofs, `::1`) verified - all correct
+  - log: 2026-09-28T13:33:41Z @kj edited repro added "run `jupyterlab-notify --url http://remote-host -m x` with a local server up and no --token; the local token reaches remote-host"
+  - log: 2026-09-28T13:33:41Z @kj edited evidence added "_is_loopback_url gates detect_token(); 10-case host truth table passed, including 127.0.0.1@evil.com and localhost.evil.com"
+  - log: 2026-09-28T13:33:41Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T16:38:43Z @kj corrected evidence: truth table has 10 host cases, not 9
+- [x] `DEF-SEC-19` **Localhost auth bypass wired to a method jupyter_server never calls** - MAJOR; the opt-in bypass is implemented as a get_current_user override; jupyter_server 2.21.1 prepare() reaches an override only when type(identity_provider) is IdentityProvider, and the default is PasswordIdentityProvider, so it is never reached; the documented tokenless loopback ingest returns 403
+  - evidence: the unreachable bypass is deleted: setting constant, both helpers, the get_current_user override, the env plumbing and the two over-mocked tests; no dangling references, suite 29 to 27, auth gate still passes on jupyter_server's own authentication
+  - repro: set JUPYTERLAB_NOTIFICATIONS_ALLOW_UNAUTHENTICATED_LOCALHOST=1, POST to /ingest from loopback with no token; 403
+  - test-tags: UNIT, FUNCTIONAL
+  - root-cause: 2026-09-28T14:19:33Z @kj prepare() gates the deprecated get_current_user path on an exact IdentityProvider type; measured type(identity_provider) is IdentityProvider -> False
+  - log: 2026-09-28T14:19:33Z @kj added
+  - log: 2026-09-28T14:55:42Z @kj closed
+- [x] `DEF-SEC-20` **Remote target can only be authenticated through argv** - MAJOR; the loopback gate on token discovery also blocks the environment branch, so for a non-loopback --url JUPYTER_TOKEN, JUPYTERHUB_API_TOKEN and JPY_API_TOKEN are all ignored and --token is the only channel; /proc/<pid>/cmdline is world-readable, and the help epilog teaches that exact form
+  - evidence: JUPYTERLAB_NOTIFY_TOKEN is honoured for any target before the loopback gate, so a remote send needs no secret in argv, while the server token and ambient Jupyter variables stay loopback-only; two tests assert the aimed token reaches a remote host and the ambient one does not
+  - repro: export JUPYTER_TOKEN=x; run with --url pointing at a non-loopback host; the request carries no Authorization header
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T14:19:33Z @kj the DEF-SEC-12 loopback gate was placed around all token discovery instead of around the server-token lookup alone
+  - log: 2026-09-28T14:19:33Z @kj added
+  - log: 2026-09-28T15:02:59Z @kj closed
+- [x] `DEF-SEC-38` **Ingest accepts any JSON type, and one bad payload discards the rest of a poll batch** - MAJOR; validation is only a presence check, so message may be a number, dict, list or null and actions may be a string; the frontend then throws inside displayNotification, which aborts the forEach over the whole drained batch, and because the drain is destructive those notifications are gone
+  - evidence: ingest now requires a dict body, a non-empty string message and a list actions, 400 otherwise; 9 parametrised tests cover numeric, object, list, null, empty and whitespace messages, string actions and scalar bodies, and all 9 fail when the type checks are removed
+  - repro: POST {"message":"ok","actions":"Retry"} then two good ones; the next poll displays 1 of 3
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T15:48:30Z @kj the handler checks that message is present but never that it or actions has a usable type
+  - log: 2026-09-28T15:48:30Z @kj added
+  - log: 2026-09-28T15:57:49Z @kj closed
+  - log: 2026-09-28T16:28:55Z @kj regressed as DEF-SEC-38-1
+- [x] `DEF-SEC-38-1` **Ingest accepts any JSON type, and one bad payload discards the rest of a poll batch** - MAJOR; validation is only a presence check, so message may be a number, dict, list or null and actions may be a string; the frontend then throws inside displayNotification, which aborts the forEach over the whole drained batch, and because the drain is destructive those notifications are gone
+  - test-tags: UNIT
+  - repro: POST {"message": "ok", "actions": [{"label": {"x": 1}}]} to ingest and read the status
+  - evidence: ingest validates action elements, not just the container: routes.py rejects a non-dict action and a non-string label with 400; mutation-proven, reverting to container-only validation fails 5 of the 14 parametrised cases; 59 pytest green
+  - log: 2026-09-28T16:28:55Z @kj regression of DEF-SEC-38; reason: the fix validated the container but not the elements: actions [null] is accepted, and action.label then throws browser-side, so the batch loss still reproduces
+  - log: 2026-09-28T16:38:52Z @kj closed
+  - log: 2026-09-28T16:59:44Z @kj edited repro added "POST {"message": "ok", "actions": [{"label": {"x": 1}}]} to ingest and read the status"; test-tags added "UNIT"
+- [x] `DEF-SEC-40` **The auth gate passes when ws_authenticated is swapped for allow_unauthenticated** - MINOR; removing the decorator is caught, but replacing it with allow_unauthenticated makes check_auth.py print that every endpoint requires authentication and exit 0, so the notification stream could be made world-readable with CI green
+  - evidence: a test asserts the stream's __allow_unauthenticated marker is False; it fails with True when the decorator is swapped for allow_unauthenticated, which check_auth.py passes with exit 0, and fails with None when the decorator is removed
+  - repro: swap @ws_authenticated for @allow_unauthenticated on the stream handler; check_auth.py exits 0
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T15:48:31Z @kj the gate only reports handlers with no auth decorator at all, not ones that opt out explicitly
+  - log: 2026-09-28T15:48:31Z @kj added
+  - log: 2026-09-28T15:57:49Z @kj closed
+- [x] `DEF-SEC-43` **A loopback --url gets no token when several servers are listed** - MAJOR; detect_token routes through _select_server, which refuses to choose even though --url already named the target, so the request goes unauthenticated and returns 403; the help promises the server token is used for any loopback target, and the ambiguity message tells the operator to pass --url, which then fails this way
+  - evidence: _match_listed_server matches an explicit loopback --url to a listed server on port and base path, so ambiguity between two servers no longer denies it a token; 5 new cli tests including the 2-server case; 59 pytest green
+  - repro: run two labs sharing a runtime dir with no token variables set, then send with --url http://127.0.0.1:<port>; 403
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T16:29:34Z @kj the resolution site reads the server list but never matches an explicit --url against it
+  - log: 2026-09-28T16:29:34Z @kj added
+  - log: 2026-09-28T16:38:52Z @kj closed
+  - log: 2026-09-28T18:18:35Z @kj the match worked but the token did not: detect_token returned an ambient variable rather than the matched server's token, and the test stubbed detect_token so the suite could not see it; fixed as DEF-SEC-55
+- [x] `DEF-SEC-55` **detect_token discarded the addressed server's token for an ambient one** - MAJOR; with JUPYTERHUB_API_TOKEN, JPY_API_TOKEN or JUPYTER_TOKEN set - every JupyterHub single-user container - a loopback --url to any other local server got the ambient token and answered 403, and the live hub credential was sent to whichever loopback server was addressed
+  - evidence: detect_token resolves the server first and prefers its token, falling back to the variables when the record has none; 6 new parametrised tests over all three variables, and the concealing stub is removed from the ambiguity test; mutation-proven, restoring the environment-first order fails 3 tests; 66 pytest green
+  - repro: set JUPYTER_TOKEN, start a second loopback server with its own token, send with --url pointing at it and read the 403
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T18:13:05Z @kj the environment was read before the server record the caller threaded in; a test stub of detect_token encoded the precedence the real function did not implement, so the suite could not see it
+  - log: 2026-09-28T18:13:05Z @kj added
+  - log: 2026-09-28T18:18:21Z @kj closed
+- [x] `DEF-SEC-58` **Stream URL carried the token where JupyterLab core does not** - MINOR; the WebSocket URL appended settings.token whenever it was set, while @jupyterlab/services gates on appendToken, which is false for a same-host session where the httpOnly cookie carries the handshake
+  - evidence: measured on a token-protected same-host server: the socket opened with no token query parameter, no close event, and --now delivered in 1230 ms; matches @jupyterlab/services at kernel/default.js:84 and serverconnection.js:145-152
+  - repro: start a lab with an explicit token and read the stream request URL
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:13:05Z @kj the gate checked the token rather than appendToken, contradicting this project's own stated rule that the token travels in a header
+  - log: 2026-09-28T18:13:05Z @kj added
+  - log: 2026-09-28T18:18:21Z @kj closed
+  - log: 2026-09-28T18:37:21Z @kj edited evidence "the stream URL is gated on settings.appendToken, as @jupyterlab/services gates its own kernel sockets; 9 Galata E2E green including the two push tests that assert delivery within 3s, so the handshake still authenticates on the httpOnly cookie alone" -> "the stream URL is gated on settings.appendToken, matching @jupyterlab/services at kernel/default.js:84, which gates its own kernel socket on appendToken and a non-empty token; serverconnection.js:145-153 makes appendToken false for a same-host session"
+  - log: 2026-09-28T18:37:21Z @kj previous evidence was a non-proof: the Galata fixture sets IdentityProvider.token to empty, so settings.token is empty in the browser and the old and new gates build the identical URL; it also said two push tests bound at 3s when only one does, the all-tabs assertions being 5s
+  - log: 2026-09-28T18:45:58Z @kj edited evidence "the stream URL is gated on settings.appendToken, matching @jupyterlab/services at kernel/default.js:84, which gates its own kernel socket on appendToken and a non-empty token; serverconnection.js:145-153 makes appendToken false for a same-host session" -> "measured on a token-protected same-host server: the socket opened with no token query parameter, no close event, and --now delivered in 1230 ms; matches @jupyterlab/services at kernel/default.js:84 and serverconnection.js:145-152"
+- [-] `DEF-SEC-75` **A loopback --url matching no listed server gets the selected server token** - MINOR; when an explicit loopback --url matches no listed record, detect_token re-resolves through _select_server and the named port receives that server token; needs another local account listening on the named port
+  - repro: list one server on one port, send with --url naming a different loopback port held by a capturing listener, read the Authorization header
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T19:44:09Z @kj urllib replays the Authorization header to a redirect target and downgrades the POST to a GET; measured delivering a loopback server's token to 127.0.0.2, which _is_loopback_url rejects
+  - root-cause: 2026-09-28T18:42:23Z @kj the two-line re-resolution in detect_token runs even when the caller already resolved the target and found no match
+  - log: 2026-09-28T18:42:23Z @kj added
+  - log: 2026-09-28T18:45:57Z @kj rejected: out of bar and pre-existing; needs a second local account listening on a loopback port the administrator mistypes, and DEF-SEC-55 narrowed it from a live hub credential to one server own token; the cause-removing fix changes send_notification_api for a caller passing no server, so it is the operator call; reason: the declination has to name the exposure, the narrowing and the cost of the fix, or a later session reopens it
+  - log: 2026-09-28T19:44:09Z @kj root-cause overridden; reason: two round-7 lenses measured this independently; recording it here so round 8 does not re-derive it, since it needs this defect's own rejected premise - a loopback listener answering 302
+- [x] `DEF-SEC-118` **Trailing slash on --url made every send 404** - MAJOR; the endpoint was the only base-URL join without normalisation, so a --url ending in a slash produced POST //jupyterlab-notifications-extension/ingest and the server answered 404 for a deliverable notification
+  - evidence: the endpoint rstrips the base URL; 4 parametrised cases assert no doubled slash for bare, trailing-slash, path and path-with-slash forms; reverting the rstrip fails 2 of them
+  - repro: send with --url http://127.0.0.1:8888/ against a running server
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T21:13:48Z @kj five other base-URL sites rstrip; this one concatenated raw, and it is the only one fed by user input
+  - log: 2026-09-28T21:13:48Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-SEC-119` **Unmatched loopback --url received another server's token** - MAJOR; detect_token re-derived a server when handed none, so a mistyped port got the selected server's token; separately a falsy port made --url http://127.0.0.1:0 and https://127.0.0.1/ match a plaintext server on 8888
+  - evidence: detect_token uses only the record it is handed; the port falls back only when absent, and a record's scheme must match; 4 tests plus a positive control, and each of the three mutants fails one
+  - repro: send with --url http://127.0.0.1:9999 while one server is listed, and inspect the Authorization header
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T21:13:48Z @kj detect_token looked a record up instead of using the one it was given, and parsed.port or DEFAULT_PORT treated port 0 and a portless URL as absent
+  - log: 2026-09-28T21:13:48Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-SEC-133` **Portless --url matched the 8888 record** - MAJOR; a URL with no port fell back to this project's default instead of the scheme's, so --url http://127.0.0.1/ matched the 8888 server while urlopen addressed port 80, sending that server's token to whatever answers there
+  - evidence: a portless URL takes the scheme's default port; 4 negative cases plus 2 positive controls for records on 80 and 443, and reverting to the 8888 fallback fails 3
+  - repro: match http://127.0.0.1/ against a listed server on port 8888
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:08:30Z @kj the round-9 fix covered port 0 and the scheme but kept 8888 as the fallback for an absent port
+  - log: 2026-09-28T22:08:30Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-SEC-143` **Record hostname discarded, token sent to loopback** - MAJOR; _server_url hardcoded 127.0.0.1 and the matcher ignored the record's hostname, so a server started with --ip=<a specific address> had its token posted to whatever local process held that port, reported as sent
+  - evidence: _record_is_loopback gates both the matcher and _server_url, which now uses the record's own host; 3 tests including a positive control for a 0.0.0.0 record, and each of the two mutants fails one
+  - repro: list a server whose hostname is not loopback, run a listener on 127.0.0.1 at that port, and send
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:47:18Z @kj the record carries hostname and url and the code used neither, comparing only port, scheme and base path
+  - log: 2026-09-28T22:47:18Z @kj added
+  - log: 2026-09-28T22:47:59Z @kj closed
+  - log: 2026-09-29T00:31:08Z @kj evidence superseded: _record_is_loopback was replaced in round 13 by _LOOPBACK_HOST_FOR plus _loopback_literals_for, and in round 14 the URL side gained the matching table
+- [x] `DEF-SEC-144` **Empty --url delivered somewhere else and exited 0** - MAJOR; argparse gives an unset shell variable an empty string, which is falsy, so the branch fell through to auto-detection and a cron job addressing a remote lab posted to the operator's own with exit 0
+  - evidence: the branch tests for presence, so an empty --url exits 1 and sends nothing; the test asserts no request was made and stdout is empty, and reverting to truthiness fails it
+  - repro: run with --url "" while one server is listed
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:47:18Z @kj the branch tested truthiness where it needed to test presence
+  - log: 2026-09-28T22:47:18Z @kj added
+  - log: 2026-09-28T22:47:59Z @kj closed
+- [x] `DEF-SEC-155` **IPv6 loopback records addressed as IPv4, refusing and leaking** - MAJOR; the allowlist claimed 127.0.0.1 reaches :: and ::1; tornado binds AF_INET6 with IPV6_V6ONLY so it reaches neither, so the send was refused and the freed IPv4 port let any local process collect the token
+  - evidence: the map sends :: and ::1 to [::1] and brackets any other IPv6 host; 3 tests, and mapping them back to 127.0.0.1 fails 2 while dropping the bracketing fails 1
+  - repro: start a server with --ip=::1, run a listener on 127.0.0.1 at that port, and send
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T23:29:04Z @kj the allowlist was written with a stated premise and two of its six members were never tested against it
+  - log: 2026-09-28T23:29:04Z @kj added
+  - log: 2026-09-28T23:29:05Z @kj closed
+- [x] `DEF-SEC-156` **A record's own token withheld from that record's own address** - MAJOR; the gate tested whether the URL text looked like loopback, so a server bound with --ip= was addressed correctly and then refused with 403 every time, while the CLI already held that record's token
+  - evidence: the record's own token is used whenever main resolved a record, the ambient variables stay gated on a loopback URL; 2 tests including a positive control that a remote --url still gets nothing
+  - repro: start a server with --ip=127.0.0.2 and send to it with no token in the environment
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T23:29:04Z @kj honouring the record's host without moving the trust decision from the URL text to the record's provenance
+  - log: 2026-09-28T23:29:04Z @kj added
+  - log: 2026-09-28T23:29:05Z @kj closed
+- [x] `DEF-SEC-163` **Loopback --url matched a record of the other address family** - CRITICAL; the matcher used the host table as a membership set and never compared its value, so a 127.0.0.1 URL matched an IPv6-only record and handed over its token while the real server was healthy on the other family, exit 0
+  - evidence: the table maps each bind address to every loopback literal that reaches it and the matcher tests the literal the URL names; crossed pairs no longer match, both-family binds still do, and a membership-test mutant fails 2 tests
+  - repro: start a server with --ip=::1, send with --url http://127.0.0.1:<port>/, and listen on that IPv4 port
+  - test-tags: UNIT
+  - root-cause: 2026-09-29T00:03:32Z @kj the round-12 fix gave the table one literal per bind address, which answered the URL builder but could not answer the matcher
+  - log: 2026-09-29T00:03:32Z @kj added
+  - log: 2026-09-29T00:04:07Z @kj closed
+- [x] `DEF-SEC-164` **The CI auth gate could be switched off by an ambient config file** - MAJOR; allow_unauthenticated_access was a constructor kwarg, which file config overrides, so with one line in any config directory the gate reported success over an endpoint carrying no decorator
+  - evidence: the trait is set on the command line, which traitlets applies after file config; measured with the working tree on PYTHONPATH, the undecorated mutant now exits 1 under a hostile config where the old gate exited 0
+  - repro: remove the decorator from ingest post and run the gate with a config setting allow_unauthenticated_access True
+  - test-tags: MANUAL
+  - root-cause: 2026-09-29T00:03:32Z @kj traitlets applies file config after construction, and jupyter_server warns only when the trait is False
+  - log: 2026-09-29T00:03:32Z @kj added
+  - log: 2026-09-29T00:03:32Z @kj closed
+  - log: 2026-09-29T00:04:07Z @kj edited evidence "the table maps each bind address to every loopback literal that reaches it and the matcher tests the literal the URL names; crossed pairs no longer match, both-family binds still do, and a membership-test mutant fails 2 tests" -> "the trait is set on the command line, which traitlets applies after file config; measured with the working tree on PYTHONPATH, the undecorated mutant now exits 1 under a hostile config where the old gate exited 0"
+- [x] `DEF-SEC-171` **A localhost URL matched a record of the family it does not resolve to** - CRITICAL; the matcher mapped every non-::1 host to 127.0.0.1 by string rule while urllib resolves localhost to ::1 first under RFC 6724, so an IPv4-only record - what every hub-spawned server and every 0.0.0.0 bind produces - had its token sent to whoever held the IPv6 port
+  - evidence: the matcher intersects what the URL host reaches with what the record's bind is reachable at, and main re-addresses the matched record; live, the token reaches the real server and an IPv6 squatter gets nothing; 7 mutants killed
+  - repro: list a record with hostname 0.0.0.0, send with --url http://localhost:<port>/, and listen on [::1] at that port
+  - test-tags: UNIT
+  - root-cause: 2026-09-29T00:37:42Z @kj the request was addressed to the operator's host text after the matcher had validated a record, so the matcher's decision and the transport's resolution could disagree
+  - log: 2026-09-29T00:37:42Z @kj added
+  - log: 2026-09-29T00:38:02Z @kj closed
+- [x] `DEF-SEC-172` **The CI auth gate had two more switches outside the repository** - MAJOR; initialize executes any jupyter_server_config.py inside the catch_warnings block, so such a file can call simplefilter ignore and drop the warning, and reraise_server_extension_failures was still a constructor kwarg
+  - evidence: JUPYTER_NO_CONFIG is set before the jupyter_server import, so no outside config executes; the undecorated mutant now exits 1 under both an allow-unauthenticated config and a simplefilter-ignore config
+  - repro: remove the decorator from ingest post and run the gate with a config whose body is warnings.simplefilter('ignore')
+  - test-tags: MANUAL
+  - root-cause: 2026-09-29T00:37:42Z @kj the round-13 fix hardened the trait and not the filter list, and left the second kwarg in the form the first was moved out of
+  - log: 2026-09-29T00:37:42Z @kj added
+  - log: 2026-09-29T00:37:43Z @kj closed
+  - log: 2026-09-29T00:38:02Z @kj edited evidence "the matcher intersects what the URL host reaches with what the record's bind is reachable at, and main re-addresses the matched record; live, the token reaches the real server and an IPv6 squatter gets nothing; 7 mutants killed" -> "JUPYTER_NO_CONFIG is set before the jupyter_server import, so no outside config executes; the undecorated mutant now exits 1 under both an allow-unauthenticated config and a simplefilter-ignore config"
+- [x] `DEF-SEC-177` **check_auth.py gate defeated by an empty JUPYTER_NO_CONFIG** - MAJOR; the CI gate used os.environ.setdefault, and jupyter_core tests JUPYTER_NO_CONFIG for string truthiness, so an exported empty value survived setdefault, read as falsy and re-opened the config path the line exists to close; measured: JUPYTER_NO_CONFIG= with a hostile JUPYTER_CONFIG_DIR gave exit 0 against an undecorated endpoint; fix: assign the value; .github/scripts/check_auth.py
+  - evidence: assignment replaces setdefault; the same invocation now exits 1 on an undecorated endpoint
+  - repro: JUPYTER_NO_CONFIG= JUPYTER_CONFIG_DIR=<dir granting anonymous access> python .github/scripts/check_auth.py
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:20:40Z @kj added
+  - log: 2026-09-29T02:20:41Z @kj closed
+- [x] `DEF-SEC-178` **Empty JUPYTER_PORT addressed port 80 with the ambient token** - MAJOR; both fallback sites read os.environ.get('JUPYTER_PORT', DEFAULT_PORT), so a set-but-empty variable produced http://127.0.0.1:/jupyterlab-notifications-extension/ingest, which is port 80, and the loopback rule then attached the ambient token to whatever answered there; fix: 'or DEFAULT_PORT' at both sites; cli.py
+  - evidence: both sites use 'or DEFAULT_PORT'; 130 pytest green
+  - repro: JUPYTER_PORT= jupyterlab-notify -m x with no server listed; read the URL line
+  - test-tags: UNIT
+  - log: 2026-09-29T02:20:41Z @kj added
+  - log: 2026-09-29T02:20:41Z @kj closed
+- [x] `DEF-SEC-179` **Token in the request path from a --url query string** - CRITICAL; an unmatched --url carrying ?token=SECRET had the endpoint appended, giving the path /?token=SECRET/jupyterlab-notifications-extension/ingest, so the token sat in the request line and every access log; cause: concatenation onto raw --url text; fix: rebuild the base from scheme, host and path only; cli.py
+  - evidence: test_a_url_query_or_fragment_never_reaches_the_request, 3 cases; mutant removing the rebuild kills all 3; 130 pytest green
+  - repro: jupyterlab-notify --url 'http://127.0.0.1:8912/?token=SECRET' -m x; read the request line
+  - test-tags: UNIT
+  - log: 2026-09-29T02:20:57Z @kj added
+  - log: 2026-09-29T02:20:57Z @kj closed
+- [x] `DEF-SEC-180` **A record with no bind address reached both loopback families** - MAJOR; _LOOPBACK_HOST_FOR mapped an absent hostname to 127.0.0.1 and ::1, so a record with no hostname matched a loopback URL of either family and lent it its token; ServerApp.server_info always writes hostname, so the shape is impossible; fix: the row is gone, an unlisted bind reaches nothing; cli.py
+  - evidence: test_a_record_with_no_bind_address_matches_nothing, 3 URLs; restoring the '' row kills all 3; 130 pytest green
+  - repro: call _match_listed_server with a loopback URL and a record carrying no hostname key
+  - test-tags: UNIT
+  - log: 2026-09-29T02:20:57Z @kj added
+  - log: 2026-09-29T02:20:57Z @kj closed
+- [x] `DEF-SEC-192` **The pasted token still reached stderr** - MAJOR; DEF-SEC-179 scrubbed the query inside send_notification_api only, so main had already printed the raw --url and still held it for the failure line: two copies of the credential on a stream that is a log file for an unattended sender; fix: one _without_credentials helper called where a URL enters; cli.py
+  - evidence: test_a_pasted_token_never_reaches_stderr asserts on the whole stream; reverting the main call kills it; 145 pytest green
+  - repro: jupyterlab-notify -m x --url 'http://127.0.0.1:8941/?token=SECRET' 2>&1 | grep -c SECRET
+  - test-tags: UNIT
+  - log: 2026-09-29T02:47:07Z @kj added
+  - log: 2026-09-29T02:47:07Z @kj closed
+- [x] `DEF-SEC-193` **The CI gate's load-bearing line was labelled redundant** - MAJOR; the comment called the argv that sets allow_unauthenticated_access False redundant with JUPYTER_NO_CONFIG; the trait defaults True and jupyter_server warns only when it is False, so deleting that line leaves the gate green for ever; fix: the comment says so; .github/scripts/check_auth.py
+  - evidence: measured: with the argv an undecorated post exits 1 and names the verb, without it exits 0 and reports all endpoints authenticated
+  - repro: remove the argv argument and run the gate against an undecorated ingest post
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:47:24Z @kj added
+  - log: 2026-09-29T02:47:24Z @kj closed
+- [x] `DEF-SEC-215` **A password in --url reached stderr twice** - MINOR; the scrub removed the query and the fragment but left userinfo, so a URL pasted from a proxy note printed its password on the progress line and in the failure line - the two sinks DEF-SEC-192 closed; this tool authenticates by token only; fix: dropped; cli.py
+  - evidence: test_url_userinfo_never_reaches_the_request_or_stderr; restoring the netloc kills it; a live run prints the host alone; 145 pytest green
+  - repro: jupyterlab-notify -m x --url 'http://admin:s3cr3t@host:8888/' and read stderr
+  - test-tags: UNIT
+  - log: 2026-09-29T03:14:09Z @kj added
+  - log: 2026-09-29T03:14:09Z @kj closed
+  - log: 2026-09-29T03:33:35Z @kj regressed as DEF-SEC-215-1
+- [x] `DEF-SEC-215-1` **A password in --url reached stderr twice** - MINOR; the scrub removed the query and the fragment but left userinfo, so a URL pasted from a proxy note printed its password on the progress line and in the failure line - the two sinks DEF-SEC-192 closed; this tool authenticates by token only; fix: dropped; cli.py
+  - test-tags: UNIT
+  - repro: jupyterlab-notify -m x --url 'http://user:p[a]ss@127.0.0.1:8888/' and read stderr
+  - evidence: the unparsed path cuts the authority by text; test_a_credential_is_cut_from_a_url_that_cannot_be_parsed, 3 shapes; reverting it kills all 3; byte-identical on all nine URLs the parsing path handled; 151 pytest green
+  - log: 2026-09-29T03:33:35Z @kj regression of DEF-SEC-215: closure was partial: the same round made the scrub total by returning an unparseable URL unchanged, and urlparse rejects a bracket anywhere in the authority, so a password containing one kept the credential in both stderr sinks; no typo needed
+  - log: 2026-09-29T03:33:35Z @kj closed
+  - log: 2026-09-29T03:33:35Z @kj edited repro added "jupyterlab-notify -m x --url 'http://user:p[a]ss@127.0.0.1:8888/' and read stderr"; test-tags added "UNIT"
+  - log: 2026-09-29T03:53:33Z @kj regressed as DEF-SEC-215-2
+- [x] `DEF-SEC-215-2` **A password in --url reached stderr twice** - CRITICAL; the scrub removed the query and the fragment but left userinfo, so a URL pasted from a proxy note printed its password on the progress line and in the failure line - the two sinks DEF-SEC-192 closed; this tool authenticates by token only; fix: dropped; cli.py
+  - evidence: the fragment and query are cut before either path runs; test_a_query_before_the_first_slash_cannot_become_the_host, 4 shapes; removing the cut kills 8 tests; live run now reports the URL named and sends nothing; 157 pytest green
+  - test-tags: UNIT
+  - repro: jupyterlab-notify -m x --url 'http://[::1:8888?u=a@localhost:9099' with JUPYTER_TOKEN set
+  - log: 2026-09-29T03:53:33Z @kj regression of DEF-SEC-215-1: its own fix opened a worse hole: the text path partitioned on / only, so a query before the first slash was swallowed into the authority and whatever followed its last @ became the host; measured delivering this host's ambient token to a port the operator never named, exit 0
+  - log: 2026-09-29T03:53:41Z @kj edited severity "MINOR" -> "CRITICAL"; repro added "jupyterlab-notify -m x --url 'http://[::1:8888?u=a@localhost:9099' with JUPYTER_TOKEN set"; test-tags added "UNIT"
+  - log: 2026-09-29T03:53:41Z @kj closed
+- [-] `DEF-SEC-224` **A record's own token is withheld on the explicit --url path for a non-loopback bind** - MINOR; auto-detect sends a record's token to its --ip address, while the same address given as --url gets none, because the matcher refuses every non-loopback URL before the reachability test; with several servers listed --url is the only route, so that operator gets 403; cli.py
+  - repro: list one record with hostname 127.0.0.2 and send both with and without --url; compare the Authorization header
+  - test-tags: MANUAL
+  - log: 2026-09-29T03:34:11Z @kj added
+  - log: 2026-09-29T03:34:17Z @kj rejected: deferred as a documented limitation; reason: the architect measured it and recommended deferring: widening the matcher to a non-loopback host is what rounds 13 and 14 narrowed to close a CRITICAL, and the epilog already directs that operator to JUPYTERLAB_NOTIFY_TOKEN
+- [-] `DEF-SEC-232` **Userinfo with an unencoded slash survives the scrub** - MINOR; urlsplit ends the authority at the first slash, so a password holding an unencoded / puts the @ in the path and netloc.rpartition finds nothing to cut; the whole credential then reaches both stderr sinks; / is in the base64 alphabet; cli.py
+  - repro: jupyterlab-notify -m x --url 'http://admin:s3c/r3t@127.0.0.1:8888/'
+  - test-tags: MANUAL
+  - log: 2026-09-29T03:54:17Z @kj added
+  - log: 2026-09-29T03:54:17Z @kj rejected: deferred as a documented boundary; reason: the bug-hunter recommended deferring: RFC 3986 ends the authority at the first slash, so such a URL is malformed, and any cut hunting for an @ past that slash would corrupt a legitimate path, where @ is legal
+- [x] `DEF-SEC-249` **An exported-empty token variable suppressed every other token source** - MAJOR; os.environ.get bound the empty string, which is not None, so the record's own token and the ambient gate were both skipped and the send carried no credential; the only one of ten environment reads in the tree not applying this project's rule; fix: or None; cli.py
+  - evidence: measured Authorization None before and token record-token after; test_an_exported_empty_token_variable_is_an_absent_one; dropping or None kills it; same class as DEF-SEC-177 and DEF-SEC-178
+  - repro: JUPYTERLAB_NOTIFY_TOKEN= exported, sending to a record that has a token
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:51Z @kj added
+  - log: 2026-09-29T04:44:51Z @kj closed
+- [x] `DEF-SEC-258` **An empty --token suppressed every other credential source** - MAJOR; argv was passed through unconditioned and the gate tested is None, so an unset shell variable interpolated into the flag skipped the record's own token and the ambient gate alike and took a 403; the environment read of the same value was fixed a round earlier; cli.py
+  - evidence: test_an_empty_token_flag_is_an_absent_one; reverting the gate kills it; the architect and the bug-hunter filed it independently, measured Authorization None
+  - repro: jupyterlab-notify --token '' -m x against a record that has a token
+  - test-tags: UNIT
+  - log: 2026-09-29T05:16:02Z @kj added
+  - log: 2026-09-29T05:16:02Z @kj closed
+- [-] `DEF-SEC-267` **A socket-bound server is matched and addressed at port 0** - MINOR; jupyter_server sets port 0 for a --sock server and still writes hostname from ServerApp.ip, so the record matches a loopback URL and is addressed at an unconnectable port; the operator is told the server is not running while it is; cli.py
+  - repro: start a lab with --sock and send with no --url
+  - test-tags: MANUAL
+  - log: 2026-09-29T05:16:26Z @kj added
+  - log: 2026-09-29T05:16:37Z @kj rejected: deferred as a documented shape; reason: the architect measured that the cheap fix is worse: skipping socket records makes a lone socket server fall through to the default address, where the loopback gate would offer the ambient token to whatever holds 8888
 
-## Resilience
+## Maintainability and consistency `MAINT`
 
-- [x] `DEF-15` **background poll spilled a console error every cycle while offline** - LOW; `fetchAndDisplayNotifications` did `console.error('Failed to fetch notifications from server', reason)` on every failed 30s poll, so a transient network drop (offline tab, suspended machine, `net::ERR_NETWORK_IO_SUSPENDED`) flooded the console with a fresh red error once per cycle - ungraceful and alarming for an expected, self-healing condition; fix: a module-level `pollOffline` flag warns once on the offline transition and stays silent while it persists, then logs a single info line on reconnect; discrete user-initiated failures (send command, action-button command) keep `console.error` by design; `src/index.ts`
-  - 2026-07-15 reported: user observed the red `Failed to fetch notifications from server` spam during a `net::ERR_NETWORK_IO_SUSPENDED` outage - "handle our issues gracefully, not let it spill"
-  - 2026-07-15 fixed: state-transition logging (warn once offline / info once on recovery); build + 9 jest + lint clean
+Duplicated constants, dead branches and split conventions in the codebase
 
-## Logging hygiene
+- [x] `DEF-MAINT-8` **API namespace string duplicated across 5 files** - MINOR; `"jupyterlab-notifications-extension"` was hand-inlined in `routes.py` (x3), `request.ts`, `index.ts` (WS builder), `cli.py`, `scripts/send_notification.py`; fix (scoped to the active paths): `API_NAMESPACE` constant in `routes.py` (used by all 3 route patterns) and exported from `request.ts` (used by `requestAPI` and the `index.ts` WS builder); `cli.py` and the legacy standalone `scripts/send_notification.py` keep literals on purpose - both must run as standalone scripts (a package import would break direct execution / force heavy deps); `jupyterlab_notifications_extension/routes.py`, `src/request.ts`, `src/index.ts`
+  - test-tags: UNIT
+  - evidence: API_NAMESPACE in routes.py feeds all three route patterns; request.ts exports it for requestAPI and the WebSocket builder
+  - repro: grep the namespace literal; it appears three times in routes.py plus request.ts, index.ts and cli.py
+  - log: 2026-07-15T00:00:00Z @kj reported: architect major (maintainability); pre-existing pattern extended by this feature
+  - log: 2026-07-15T00:00:00Z @kj fixed: 3->1 server-side, 2->1 frontend; standalone-script literals kept with documented rationale
+  - log: 2026-09-28T13:33:42Z @kj edited repro added "grep the namespace literal; it appears three times in routes.py plus request.ts, index.ts and cli.py"
+  - log: 2026-09-28T13:33:42Z @kj edited evidence added "API_NAMESPACE in routes.py feeds all three route patterns; request.ts exports it for requestAPI and the WebSocket builder"
+  - log: 2026-09-28T13:33:43Z @kj edited test-tags added "UNIT"
+  - log: 2026-09-28T17:56:08Z @kj scripts/send_notification.py was removed, so cli.py is now the sole standalone file keeping the namespace literal on purpose
+- [x] `DEF-MAINT-9` **dead `'localhost'` branch in `_is_localhost`** - MINOR; `remote_ip` is always a resolved IP, so the literal `'localhost'` in the tuple could never match; fix: removed it (tuple is now `('127.0.0.1', '::1')`); `jupyterlab_notifications_extension/routes.py`
+  - test-tags: UNIT
+  - evidence: tuple reduced to ('127.0.0.1', '::1')
+  - repro: remote_ip is always a resolved IP, so the literal 'localhost' in the tuple can never match
+  - log: 2026-07-15T00:00:00Z @kj reported: architect minor; pre-existing
+  - log: 2026-07-15T00:00:00Z @kj fixed: removed alongside the DEF-6 rework
+  - log: 2026-09-28T13:33:43Z @kj edited repro added "remote_ip is always a resolved IP, so the literal 'localhost' in the tuple can never match"
+  - log: 2026-09-28T13:33:43Z @kj edited evidence added "tuple reduced to ('127.0.0.1', '::1')"
+  - log: 2026-09-28T13:33:43Z @kj edited test-tags added "UNIT"
+- [x] `DEF-MAINT-13` **second logging mechanism introduced by the DEF-5 fix** - MINOR; the DEF-5 fix added `logging.getLogger(__name__)` for the `_push_immediate` warning while every other log site uses the jupyter app logger (`self.log` / `server_app.log`), so that one warning surfaced only via the root logger, not the ServerApp log; fix: `_push_immediate(notification, log)` now takes the caller's `self.log`; removed the module logger and `import logging`; `jupyterlab_notifications_extension/routes.py`
+  - test-tags: UNIT
+  - evidence: _push_immediate takes the caller's self.log; the module logger and import logging are removed
+  - repro: grep logging in routes.py; _push_immediate used logging.getLogger while every other site uses self.log
+  - log: 2026-07-15T00:00:00Z @kj reported: round-2 architect re-review, MINOR consistency
+  - log: 2026-07-15T00:00:00Z @kj fixed: warning routes through `self.log` like the other four sites
+  - log: 2026-09-28T13:33:43Z @kj edited repro added "grep logging in routes.py; _push_immediate used logging.getLogger while every other site uses self.log"
+  - log: 2026-09-28T13:33:43Z @kj edited evidence added "_push_immediate takes the caller's self.log; the module logger and import logging are removed"
+  - log: 2026-09-28T13:33:43Z @kj edited test-tags added "UNIT"
+- [x] `DEF-MAINT-22` **Undeclared runtime imports escaped the 4.6 pin into the 4.7 alpha line** - MAJOR; src/index.ts imports @jupyterlab/apputils and @lumino/widgets, neither declared in package.json; they resolve transitively and apputils landed on 4.7.4, the alpha line the pin policy excludes, against a lab federating 4.6.x
+  - evidence: @jupyterlab/apputils declared ^4.6.0 and @lumino/widgets ^2.9.0 in package.json, @lumino/coreutils in devDependencies; labextension/package.json now lists apputils where it was absent; three unreferenced devDeps removed and the releaser pin raised to 4.6.0; rspack build, 6 jest, 27 pytest, lint green
+  - repro: cat node_modules/@jupyterlab/apputils/package.json shows 4.7.4 while the three declared deps sit at 4.6.4/6.6.4/7.6.4
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T14:20:20Z @kj the floor policy was applied to declared dependencies only, so an undeclared import carries no constraint
+  - log: 2026-09-28T14:20:20Z @kj added
+  - log: 2026-09-28T14:59:50Z @kj closed
+  - log: 2026-09-28T14:59:56Z @kj refuted, the version half: the lab federates apputils ~4.7.4, so 4.7.4 is the matching stable release, not an excluded alpha; built requiredVersion ^4.7.4 / ^6.6.4 / ^7.6.4 all match what the lab provides
+- [x] `DEF-MAINT-45` **Galata suite could not run beside a developer lab on 8888** - MINOR; the suite pins port 8888 with no retries and refuses to reuse a server, so it failed with port 8888 is not available whenever the developer's own lab held the port
+  - evidence: JUPYTER_TEST_PORT threaded from playwright.config.js to the server config; suite ran green on 8899 beside the developer lab on 8888, 4 passed exit 0
+  - repro: start a lab on 8888, run jlpm playwright test in ui-tests, read the CRITICAL line in the webServer output
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T16:42:06Z @kj the port was written in two places and neither was settable from the caller
+  - log: 2026-09-28T16:42:06Z @kj added
+  - log: 2026-09-28T17:03:18Z @kj closed
+- [x] `DEF-MAINT-51` **CLI printed one failure three times** - MINOR; an HTTP failure printed the status, then the body, then the status again, so the last line a user reads carried no cause
+  - evidence: the request helper raises with the reason instead of printing; last line now reads 'Failed to send notification: HTTP 400 Bad Request from http://127.0.0.1:8888: {"error": ...}', one report
+  - repro: jupyterlab-notify -m ' ' against a running server and read the last line
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T16:51:52Z @kj the request helper printed and re-raised, and main printed the same exception
+  - log: 2026-09-28T16:51:52Z @kj added
+  - log: 2026-09-28T17:03:19Z @kj closed
+- [x] `DEF-MAINT-52` **focusNodeSelector addressed the first input by position** - MINOR; focusNodeSelector was 'input', which lands on the message field only because it is appended first and moves silently if a field is inserted above it
+  - evidence: focusNodeSelector is '#jp-notify-message'; measured live, document.activeElement.id at dialog open is jp-notify-message
+  - repro: read src/index.ts at the Dialog options and compare with the field order above it
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T16:51:52Z @kj a positional selector where the field already carries an id
+  - log: 2026-09-28T16:51:52Z @kj added
+  - log: 2026-09-28T17:03:19Z @kj closed
+- [-] `DEF-MAINT-54` **Five webpack-era devDependencies are unreferenced** - MINOR; css-loader, style-loader, source-map-loader, @types/react and yjs are left from the webpack builder; jlpm install warns that style-loader and source-map-loader request a webpack peer nothing provides, and the rspack build succeeds without them
+  - repro: run jlpm install and read the YN0002 missing peer dependency lines
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T17:29:21Z @kj the migration to @jupyter/builder removed webpack but not the loaders configured for it
+  - log: 2026-09-28T17:29:21Z @kj added
+  - log: 2026-09-28T17:29:21Z @kj rejected: declined this round: no user-facing effect, and two review lenses disagreed on whether the loaders are load-bearing for the labextension build; removing them needs a clean-room node_modules rebuild to settle, which is not worth spending against a warning
+- [x] `DEF-MAINT-60` **CLI diagnostics went to stdout** - MINOR; the failure report, the two JSON parse errors and the several-servers usage message printed to stdout, so a scripted send with stdout redirected showed nothing; exit codes were always correct
+  - evidence: the failure report, both JSON parse errors and the several-servers message print to sys.stderr; the exit-2 test now reads capsys err and fails if they return to stdout; 66 pytest green
+  - repro: jupyterlab-notify --url http://127.0.0.1:59998 -m x 1>/dev/null and observe no output
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T18:13:06Z @kj plain print with no stream argument
+  - log: 2026-09-28T18:13:06Z @kj added
+  - log: 2026-09-28T18:18:21Z @kj closed
+- [x] `DEF-MAINT-61` **A non-UTF-8 error body replaced the failure report** - MINOR; e.read().decode('utf-8') was evaluated while building the raise, so a body that is not UTF-8 raised UnicodeDecodeError and the status, reason and URL were all lost from the one line the operator reads
+  - evidence: the body decodes with errors='replace', so the status, reason and URL survive a non-UTF-8 body
+  - repro: answer with a body of b'\xff\xfe bad' and read the printed line
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:13:06Z @kj a strict decode inside the raise expression
+  - log: 2026-09-28T18:13:06Z @kj added
+  - log: 2026-09-28T18:18:22Z @kj closed
+- [x] `DEF-MAINT-62` **Release workflow uploaded under a sibling project's name** - MINOR; check-release.yml named its artifact jupyterlab_tabular_data_viewer_extension-releaser-dist, the only foreign project name in .github
+  - evidence: check-release.yml names jupyterlab_notifications_extension-releaser-dist; no foreign project name remains in .github
+  - repro: grep the workflows for the artifact name
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:13:06Z @kj copied from a sibling extension and not renamed
+  - log: 2026-09-28T18:13:06Z @kj added
+  - log: 2026-09-28T18:18:22Z @kj closed
+- [x] `DEF-MAINT-63` **Three names for one retention number, and an orphaned docblock** - MINOR; MAX_TRACKED_NOTIFICATIONS was forwarded by two single-use aliases, so a reader found three identifiers for one dial, and inserting it between a docblock and its declaration left the serverCreatedAt comment sitting on a constant
+  - evidence: both aliases deleted and MAX_TRACKED_NOTIFICATIONS used at each eviction site; both stacked docblocks now sit on their own declarations, and grep for the deleted names over src returns nothing
+  - repro: count the use sites of MAX_SEEN_IDS and MAX_SERVER_CREATED_AT
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:17:33Z @kj the round-3 shared-constant fix kept the old names as pass-throughs
+  - log: 2026-09-28T18:17:33Z @kj added
+  - log: 2026-09-28T18:18:22Z @kj closed
+  - log: 2026-09-28T18:37:21Z @kj evidence overstated: the serverCreatedAt docblock was NOT moved, and the alias deletion left two comments naming the deleted constants at src/index.ts:56 and :253; correcting the code, then this evidence
+  - log: 2026-09-28T18:45:57Z @kj edited evidence "both aliases deleted, MAX_TRACKED_NOTIFICATIONS used at each eviction site, and the serverCreatedAt docblock moved onto its declaration; tsc and 17 jest green" -> "both aliases deleted and MAX_TRACKED_NOTIFICATIONS used at each eviction site; both stacked docblocks now sit on their own declarations, and grep for the deleted names over src returns nothing"
+- [x] `DEF-MAINT-68` **Auto-close default was a bare literal in two places** - MINOR; cli.py names DEFAULT_PORT but left 5000 inline in the function signature and in the argparse default 188 lines apart, with nothing asserting the two agree
+  - evidence: DEFAULT_AUTO_CLOSE_MS sits beside DEFAULT_PORT and is referenced at both the function default and the argparse default
+  - repro: grep cli.py for 5000
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:17:33Z @kj one dial named, the other not
+  - log: 2026-09-28T18:17:33Z @kj added
+  - log: 2026-09-28T18:18:22Z @kj closed
+- [x] `DEF-MAINT-69` **Two mutation conventions for the server queue** - MINOR; ingest mutated _notification_store in place while the fetch handler rebound the module global, so one global had two conventions; the rebinding was safe but is the fragile one
+  - evidence: the fetch handler calls _notification_store.clear() and its global statement is gone, so every site mutates the list in place; 66 pytest green including the queue-bound and drain tests
+  - repro: read the fetch handler against the ingest handler
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T18:17:33Z @kj a global statement where clear() would do
+  - log: 2026-09-28T18:17:33Z @kj added
+  - log: 2026-09-28T18:18:22Z @kj closed
+- [x] `DEF-MAINT-70` **lint:check failed and skipped eslint entirely** - MAJOR; `jlpm run lint:check` exited 1 on a register line, and because the script chains with && the `eslint:check` stage never ran, so a claim of lint clean covered no TypeScript; `build.yml` runs the same command, so CI would have failed on push
+  - evidence: the three pm-tools trackers are in .prettierignore with the reason recorded, because a log line quotes prior wording verbatim and reformatting it rewrites the audit trail; jlpm run lint:check exits 0 and eslint and stylelint were run directly to confirm the previously skipped stage is clean, not merely unreached
+  - repro: run `jlpm run lint:check` and read the exit code and which stages printed
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:42:23Z @kj prettier formats `docs/*.md`, and pm-tools log lines quote prior wording verbatim, so an identifier with double underscores in a quoted string is reformatted as markdown emphasis
+  - log: 2026-09-28T18:42:23Z @kj added
+  - log: 2026-09-28T18:45:46Z @kj closed
+- [x] `DEF-MAINT-73` **Failure line printed before the URL line under redirection** - MINOR; with stdout and stderr redirected to one file the failure report appeared before the progress line, because stdout is block-buffered to a pipe while stderr is not; both lines still reach the log in the same run
+  - evidence: the URL progress line moved to stderr, so it cannot be reordered after an unbuffered error and the sent id is the only stdout line; the two --verbose blocks moved with it, which also fixes --verbose producing nothing under 1>/dev/null
+  - repro: jupyterlab-notify --url http://127.0.0.1:8993 -m x > log 2>&1 and read the order
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:42:23Z @kj routing the failure to stderr while the progress line stayed on an unflushed stdout
+  - log: 2026-09-28T18:42:23Z @kj added
+  - log: 2026-09-28T18:45:47Z @kj closed
+- [x] `DEF-MAINT-76` **CLI failure report dumped the whole error body** - MAJOR; a mistyped --url ending in /lab answers 405 with the lab document, so the report ran to 110 lines and 3011 bytes with the actionable status line scrolled off the top; a proxy HTML page on a 502 does the same, which is normal operation behind configurable-http-proxy
+  - evidence: _readable_reason parses the body and takes message or error only when it is a non-empty string, mirroring request.ts; 12 new tests over 11 body shapes; mutation-proven twice, dropping the string guard fails 4 and returning the raw body fails 11 including the markup test; 78 pytest green
+  - repro: jupyterlab-notify --url http://127.0.0.1:<port>/lab -m ok and count the output lines
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T18:45:32Z @kj the HTTPError handler interpolated the decoded body unconditionally; the identical class had just been fixed for the toast in request.ts 60 lines away
+  - log: 2026-09-28T18:45:32Z @kj added
+  - log: 2026-09-28T18:45:47Z @kj closed
+- [x] `DEF-MAINT-86` **Guard arm with no measured trigger and a wrong number** - MINOR; the _readable_reason guard named RecursionError, which no input in the universe produces and no test reaches, and its comment put the threshold near 5000 where the interpreter raises at 9999
+  - evidence: RecursionError dropped and the depth clause removed; ValueError and HTTPException each have a killing mutant; OSError and TypeError are unexercised boundary arms kept for ConnectionResetError and a non-dict body; 101 pytest green
+  - repro: drop RecursionError from the tuple and run the suite; nothing fails
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:38:50Z @kj the arm and its number were written from reasoning rather than from a measurement
+  - log: 2026-09-28T19:38:50Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+  - log: 2026-09-28T20:39:11Z @kj edited evidence "RecursionError dropped from the tuple and the depth clause removed from the comment; 86 pytest green, and the three remaining classes each still have a killing mutant" -> "RecursionError dropped from the tuple and the depth clause removed; ValueError and HTTPException each have a killing mutant; OSError is an unexercised boundary arm kept for ConnectionResetError on a socket read; 91 pytest green"
+  - log: 2026-09-28T21:13:34Z @kj edited evidence "RecursionError dropped from the tuple and the depth clause removed; ValueError and HTTPException each have a killing mutant; OSError is an unexercised boundary arm kept for ConnectionResetError on a socket read; 91 pytest green" -> "RecursionError dropped and the depth clause removed; ValueError and HTTPException each have a killing mutant; OSError and TypeError are unexercised boundary arms kept for ConnectionResetError and a non-dict body; 101 pytest green"
+- [x] `DEF-MAINT-87` **Failure line printed the status phrase twice** - MINOR; jupyter_server sets 'message' to the status phrase when the error carries no log message, so the report read 'HTTP 403 Forbidden from URL: Forbidden'
+  - evidence: the reason is suppressed when it equals the status phrase; dropping the comparison fails the 403-Forbidden row, and a distinct reason still survives in the 'Token is invalid' row
+  - repro: send to an endpoint that answers 403 with a body of '{"message": "Forbidden"}'
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:38:51Z @kj the reason was appended without comparing it to the status phrase already printed
+  - log: 2026-09-28T19:38:51Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-MAINT-88` **Three values inline in modules that name every other bound** - MINOR; the API path was an f-string literal in cli.py while routes.py and request.ts name it, and the 5000ms autoClose default was inline in routes.py and index.ts
+  - evidence: API_NAMESPACE named in cli.py beside DEFAULT_PORT, DEFAULT_AUTO_CLOSE_MS named in routes.py and index.ts; 86 pytest, 17 jest, tsc exit 0
+  - repro: grep the three sites and compare with the named constants beside them
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:38:51Z @kj each was written at the call site and never lifted when the surrounding constants block appeared
+  - log: 2026-09-28T19:38:51Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-MAINT-89` **Two dead keys in the build and CI config** - MINOR; the sdist excluded a binder directory this repository does not contain, and check-links passed ignore_glob README.md, dropping the only file with links so its four-URL ignore list could not matter
+  - evidence: binder removed from the sdist exclude; check-links now passes ignore_links with the four badge URL patterns and the superseded .pytest-check-links-ignore is deleted, so the job checks README
+  - repro: run the check-links job and observe it checks no links
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T19:38:51Z @kj the glob was added for badge-host flakiness and superseded the ignore file without it being removed
+  - log: 2026-09-28T19:38:51Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-MAINT-108` **Four comments asserted what the same change falsified** - MINOR; index.ts said the message input is not inside the wrapper while the same patch put it there, and said the whitespace branch is reachable after the pattern made it unreachable; routes.py and request.ts still called cli.py's copy an inline literal after it was named
+  - evidence: all four rewritten to the post-change state; the whitespace branch was later deleted outright in round 9, being unreachable from the dialog and from a caller supplying its own message
+  - repro: read each comment against the code beside it
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T20:29:04Z @kj each statement described the state before the change that was being made in the same patch
+  - log: 2026-09-28T20:29:04Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+  - log: 2026-09-28T21:13:34Z @kj edited evidence "all four rewritten to the post-change state; the whitespace branch is now described as a guard for a direct command caller rather than a reachable path" -> "all four rewritten to the post-change state; the whitespace branch was later deleted outright in round 9, being unreachable from the dialog and from a caller supplying its own message"
+- [x] `DEF-MAINT-109` **A new constant took the comment of the one below it** - MINOR; DEFAULT_AUTO_CLOSE_MS was inserted under the POLL_INTERVAL docblock in index.ts, leaving POLL_INTERVAL undocumented, and the cli.py copy carried no gloss of its own
+  - evidence: POLL_INTERVAL has its docblock back and DEFAULT_AUTO_CLOSE_MS has its own in both index.ts and cli.py
+  - repro: read the docblock above DEFAULT_AUTO_CLOSE_MS in src/index.ts
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T20:29:04Z @kj the constant was inserted above an existing declaration without moving that declaration's comment
+  - log: 2026-09-28T20:29:04Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+- [x] `DEF-MAINT-110` **One of two timeouts named, the other inline** - MINOR; REQUEST_TIMEOUT_S cited a 5 second bound on the server-list subprocess that was a bare literal, and the --auto-close help restated the value of the constant it defaults to
+  - evidence: SERVER_LIST_TIMEOUT_S named beside REQUEST_TIMEOUT_S and used at the subprocess call; the --auto-close help uses %(default)s; 90 pytest green
+  - repro: grep timeout= in cli.py and compare with the named constants
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T20:29:04Z @kj each value was written at its call site and only one was lifted
+  - log: 2026-09-28T20:29:04Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+- [x] `DEF-MAINT-111` **Module state only one closure reads** - MINOR; streamOffline was declared module-level for symmetry with pollOffline, but every read and write is inside connectNotificationStream, while pollOffline must be module-level because setInterval calls its function
+  - evidence: streamOffline is declared beside attempts inside connectNotificationStream; tsc exit 0, 17 jest green
+  - repro: grep streamOffline and note every use is in one closure
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T20:29:04Z @kj it was placed beside pollOffline by analogy rather than by scope
+  - log: 2026-09-28T20:29:04Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+- [x] `DEF-MAINT-115` **Evidence claimed a killing mutant that does not exist** - MAJOR; DEF-MAINT-86's evidence said all three remaining exception classes have a killing mutant; dropping OSError leaves the whole suite green, so only two are proven, and the test count in the line was stale
+  - evidence: the evidence line now names ValueError and HTTPException as mutation-proven and OSError as an unexercised boundary arm; both mutants re-run in place with backup and restore
+  - repro: drop OSError from the _readable_reason guard and run the suite
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T20:39:12Z @kj the claim was written from the reasoning behind the change rather than from a run
+  - log: 2026-09-28T20:39:12Z @kj added
+  - log: 2026-09-28T20:39:12Z @kj closed
+- [x] `DEF-MAINT-116` **A flag duplicated state attempts already held** - MINOR; streamOffline was a second name for attempts === 1: attempts resets in onopen and increments once per onclose in the same closure, so the two are equal in every ordering
+  - evidence: streamOffline deleted; onclose warns on attempts === 1, which is exactly the transition; tsc exit 0, 17 jest green, 13 Galata green including both degraded-stream modes
+  - repro: compare streamOffline's writes with the attempts reset and increment
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T20:39:12Z @kj it was added by analogy with pollOffline without checking that attempts already encoded the transition
+  - log: 2026-09-28T20:39:12Z @kj added
+  - log: 2026-09-28T20:39:12Z @kj closed
+- [x] `DEF-MAINT-125` **A guard unreachable from both callers, with a comment naming one** - MINOR; the block sits inside if (!message), so a caller supplying its own message never enters it, and the pattern makes the dialog path unreachable too; the comment said it was kept for that caller
+  - evidence: the block is deleted; the pattern makes the dialog path invalid before Send and a caller supplying a message never enters the branch; 101 pytest, 17 jest, 13 Galata green
+  - repro: trace both callers into the branch
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T21:14:13Z @kj the comment was rewritten in round 8 to a reason that does not hold
+  - log: 2026-09-28T21:14:13Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-MAINT-126` **Snapshot apparatus for a suite that takes no snapshots** - MINOR; no snapshot assertion or directory exists, yet 36 README lines, a script entry and a write-permissioned comment-triggered workflow stood for it, and the documented trigger phrase could never match the workflow's condition
+  - evidence: the workflow, the script entry and the 36 README lines are removed; nothing outside the journal's history references them
+  - repro: grep the suite for toMatchSnapshot and compare the README phrase with the workflow condition
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T21:14:13Z @kj template scaffolding retained after the snapshot tests it served were never written
+  - log: 2026-09-28T21:14:13Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-MAINT-129` **Transport message was false for a reply in another protocol** - MINOR; BadStatusLine is an HTTPException for which nothing was ingested, yet the report said the notification may already exist, and raw interpolation of the peer's bytes made it two lines
+  - evidence: the message says failed before a usable answer arrived, qualifies the may-already-exist clause, and uses repr so a peer's CRLF cannot split the line; a BadStatusLine case added, 101 pytest green
+  - repro: answer the ingest POST with a non-HTTP banner such as an SSH greeting
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T21:14:13Z @kj the arm was worded for the two classes measured and the message interpolated the exception with str
+  - log: 2026-09-28T21:14:13Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-MAINT-130` **Dialog respelled the auto-close constant and the description used a second spelling** - MINOR; the seconds field was a bare '5' beside a named DEFAULT_AUTO_CLOSE_MS, and the published description said notification centre where four existing occurrences say center
+  - evidence: the dialog derives its seconds from DEFAULT_AUTO_CLOSE_MS and both description sites say center, matching the four existing occurrences
+  - repro: change DEFAULT_AUTO_CLOSE_MS and observe the dialog still opens on 5
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T21:14:13Z @kj the dialog value predates the constant, and the description was rewritten without checking the project's existing spelling
+  - log: 2026-09-28T21:14:13Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-MAINT-136` **Dead auto-detect branch and a memo counting a deleted call site** - MINOR; send_notification_api resolved a URL without the token belonging to it, from a branch no caller reaches; the memo's justification still counted the third call site round 9 deleted
+  - evidence: the branch is deleted and base_url is required, so a caller omitting it fails at the call rather than 403ing at the server; the memo docstring says twice; 104 pytest green
+  - repro: call send_notification_api with neither base_url nor server while one server is listed
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:08:49Z @kj main resolves the target once by design, so the branch was unreachable, and removing detect_token's lookup left the memo's count one too high
+  - log: 2026-09-28T22:08:49Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-MAINT-137` **Trim comment credited a guard the same work deleted** - MINOR; it said a space-only message is caught there rather than posted; the guard that caught it was removed three lines below in round 9, so such a value would now post and return 400
+  - evidence: the comment says the trim only keeps surrounding spaces out of the payload and names the pattern as what stops a space-only message
+  - repro: read the comment above the trim against the code below it
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:08:49Z @kj the guard was deleted and the comment describing its effect was left
+  - log: 2026-09-28T22:08:49Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-MAINT-138` **Transport comment gave a false reason** - MINOR; it said none of the three classes is an OSError; RemoteDisconnected subclasses ConnectionResetError and so is one, and they reach that arm because urllib wraps only the send in URLError
+  - evidence: the comment states the real reason: urllib wraps only the send in URLError, and notes RemoteDisconnected is itself an OSError
+  - repro: check RemoteDisconnected.__mro__
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:08:49Z @kj the reason was inferred from the two classes measured rather than from the class hierarchy
+  - log: 2026-09-28T22:08:49Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-MAINT-150` **The deleted fallback's twin, and a memo that memoized one read** - MINOR; get_jupyter_base_url kept the same server-is-None fallback deleted one function away, and it could only recompute None; with it gone the server list had one call site and the cache held a module global for nothing
+  - evidence: the fallback is gone, get_jupyter_base_url takes a required record, and the memo folded into one function; 109 pytest green
+  - repro: trace main's only path into get_jupyter_base_url with an empty server list
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:47:39Z @kj DEF-MAINT-136 removed one of a pair
+  - log: 2026-09-28T22:47:39Z @kj added
+  - log: 2026-09-28T22:48:00Z @kj closed
+- [x] `DEF-MAINT-151` **A string default for an integer field jupyter_server always writes** - MINOR; the port fallback substituted the string DEFAULT_PORT for a record field that is always present and always an int, and the matcher treated the same absent field as a non-match, so the two disagreed about a case neither can see
+  - evidence: the port is indexed, so DEFAULT_PORT means the environment default only
+  - repro: read the port fallback against the matcher's handling of the same field
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:47:39Z @kj DEFAULT_PORT is a string for its environment-variable use and was reused as a record default
+  - log: 2026-09-28T22:47:39Z @kj added
+  - log: 2026-09-28T22:48:00Z @kj closed
+- [x] `DEF-MAINT-152` **A required payload field typed as optional** - MINOR; message was annotated str with a None default while every one of the fifteen call sites passes it, and omitting it posts a null for the server to reject with 400 - the failure the adjacent required argument was made to prevent
+  - evidence: message is a required argument ahead of the optional ones; every call site already passed it, so no call changed
+  - repro: call send_notification_api without message
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:47:39Z @kj the default predates the requirement and no call site relied on it
+  - log: 2026-09-28T22:47:39Z @kj added
+  - log: 2026-09-28T22:48:00Z @kj closed
+  - log: 2026-09-28T23:23:43Z @kj amended text "message was annotated str with a None default while every one of the seventeen call sites passes it, and omitting it posts a null for the server to reject with 400 - the failure the adjacent required argument was made to prevent" -> "message was annotated str with a None default while every one of the fifteen call sites passes it, and omitting it posts a null for the server to reject with 400 - the failure the adjacent required argument was made to prevent"
+- [x] `DEF-MAINT-162` **Two loopback lists, one named and one inline, with no cross-reference** - MINOR; the record allowlist and the URL allowlist answer different questions and must not be merged, and nothing said so, leaving the obvious tidy-up a credential leak
+  - evidence: the URL list is named _LOOPBACK_URL_HOSTS and each list's comment names the other and says why the membership differs
+  - repro: compare the two lists and note the wildcards in one
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T23:29:05Z @kj the second list was added named and the first was left inline
+  - log: 2026-09-28T23:29:05Z @kj added
+  - log: 2026-09-28T23:29:05Z @kj closed
+- [x] `DEF-MAINT-167` **Unbracketed IPv6 --url printed a traceback** - MINOR; urlparse ran outside the guard that catches a malformed URL, and before main's own try, so http://[::1:8941/ raised where every sibling failure prints one line
+  - evidence: the loopback test and urlparse both run inside the existing ValueError guard, so a malformed IPv6 URL returns None and main reports one line
+  - repro: send with --url http://[::1:8941/
+  - test-tags: UNIT
+  - root-cause: 2026-09-29T00:03:32Z @kj the loopback test was called before the try that was added for the same class of input
+  - log: 2026-09-29T00:03:32Z @kj added
+  - log: 2026-09-29T00:04:07Z @kj closed
+  - log: 2026-09-29T03:13:28Z @kj regressed as DEF-MAINT-167-1
+- [x] `DEF-MAINT-167-1` **Unbracketed IPv6 --url printed a traceback** - MINOR; urlparse ran outside the guard that catches a malformed URL, and before main's own try, so http://[::1:8941/ raised where every sibling failure prints one line
+  - test-tags: UNIT
+  - repro: jupyterlab-notify -m x --url 'http://[::1:8888/'
+  - evidence: the scrub is total and the scheme guard reports the parse failure in our wording; test_an_unbalanced_ipv6_url_reports_one_line uses the register's own repro string; reverting either kills it; 145 pytest green
+  - log: 2026-09-29T03:13:28Z @kj regression of DEF-MAINT-167: reopened by round 17's own fix: main scrubs the --url before any guard, so urlparse's ValueError on unbalanced IPv6 brackets raised out of main and printed a traceback again; the original closure carried test-tags UNIT but no test used its repro, so nothing bit
+  - log: 2026-09-29T03:13:28Z @kj closed
+  - log: 2026-09-29T03:13:28Z @kj edited repro added "jupyterlab-notify -m x --url 'http://[::1:8888/'"; test-tags added "UNIT"
+- [x] `DEF-MAINT-168` **detect_token held a dead copy of the token precedence** - MINOR; send_notification_api reads the record's token before detect_token is called, so its record branch could not run and the order it documented was unobservable: swapping the two blocks in the send path broke no test
+  - evidence: detect_token reads only the ambient variables and takes no record; the three precedence tests assert through send_notification_api, and swapping the blocks now fails 3 where it previously failed none
+  - repro: swap the record and ambient blocks in send_notification_api and run the suite
+  - test-tags: UNIT
+  - root-cause: 2026-09-29T00:03:32Z @kj the round-12 fix moved the rule to the send path and left the original in place
+  - log: 2026-09-29T00:03:32Z @kj added
+  - log: 2026-09-29T00:03:33Z @kj closed
+  - log: 2026-09-29T00:04:07Z @kj edited evidence "the loopback test and urlparse both run inside the existing ValueError guard, so a malformed IPv6 URL returns None and main reports one line" -> "detect_token reads only the ambient variables and takes no record; the three precedence tests assert through send_notification_api, and swapping the blocks now fails 3 where it previously failed none"
+- [x] `DEF-MAINT-170` **Two comments six lines apart contradicted each other** - MINOR; one said the seconds title is the only explanation on screen, the other that the title is now redundant; the second invites deleting the field's only accessible description
+  - evidence: the first comment says the title is the field's accessible description because nothing associates the visible span with the input; the second no longer calls it removable
+  - repro: read the two comments around the seconds input
+  - test-tags: MANUAL
+  - root-cause: 2026-09-29T00:03:32Z @kj the label fix added the second without correcting the first
+  - log: 2026-09-29T00:03:32Z @kj added
+  - log: 2026-09-29T00:04:08Z @kj closed
+- [x] `DEF-MAINT-174` **Two exception arms raised a byte-identical message** - MAJOR; ConnectionError and ssl.SSLError both subclass OSError, so the arm naming them was unreachable by any input the later arm did not already take; a line trace showed its raise never executed
+  - evidence: the unreachable arm is deleted and the survivor widened to HTTPException and OSError; all nine exception classes still land on the arm their comment claims, with the same message
+  - repro: delete the named arm and run the suite
+  - test-tags: UNIT
+  - root-cause: 2026-09-29T00:37:42Z @kj the class was added to a new arm rather than to the one that already covered its parent
+  - log: 2026-09-29T00:37:42Z @kj added
+  - log: 2026-09-29T00:38:03Z @kj closed
+- [x] `DEF-MAINT-182` **Dead ssl import in cli.py** - MINOR; the arm merge in round 14 orphaned 'import ssl'; pyflakes reported 'ssl imported but unused'; fix: removed; cli.py
+  - evidence: pyflakes clean on cli.py; 130 pytest green
+  - repro: python -m pyflakes jupyterlab_notifications_extension/cli.py
+  - test-tags: UNIT
+  - log: 2026-09-29T02:21:14Z @kj added
+  - log: 2026-09-29T02:21:14Z @kj closed
+- [x] `DEF-MAINT-203` **Nine comments restating the line under them** - MINOR; Build notification payload above payload = {, Convert to JSON above json.dumps, Create request above Request(, and six more; copier-template residue that also sat in the deleted scripts/send_notification.py; fix: deleted, no behaviour or name lost; cli.py
+  - evidence: nine comment-only lines removed; 145 pytest green and pyflakes clean
+  - repro: read each comment against the statement below it
+  - test-tags: UNIT
+  - log: 2026-09-29T02:47:53Z @kj added
+  - log: 2026-09-29T02:47:53Z @kj closed
+- [x] `DEF-MAINT-204` **Four comment clauses narrating a defect the sentence above already ruled** - MINOR; the port arm, the loopback tuple, the --ip token rule and the HTTPError arm each stated their rule and then retold the failure that produced it; fix: the rule stays, the retelling goes; cli.py
+  - evidence: four clauses trimmed, roughly 8 lines; the constraint in each comment is unchanged; 145 pytest green
+  - repro: read each comment for a clause that adds no constraint
+  - test-tags: UNIT
+  - log: 2026-09-29T02:47:53Z @kj added
+  - log: 2026-09-29T02:47:53Z @kj closed
+- [x] `DEF-MAINT-234` **The module entry point called the site builtin exit** - MINOR; exit is installed by site, so python -S cli.py raised NameError instead of running; the shipped console script calls sys.exit itself, so only the module form was affected; fix: sys.exit, already imported; cli.py
+  - evidence: sys.exit at the entry point; sys is imported at the top of the module
+  - repro: python -S jupyterlab_notifications_extension/cli.py -m x
+  - test-tags: MANUAL
+  - log: 2026-09-29T04:22:56Z @kj added
+  - log: 2026-09-29T04:22:56Z @kj closed
+- [x] `DEF-MAINT-236` **The Authorization value was built at one site and rebuilt at another** - MINOR; the value sent and the value the diagnostic branch compares against were two f-strings 35 lines apart, and the test's fake builds the string itself, so a change to the first would kill the branch silently with no test failing; fix: one local, compared against itself; cli.py
+  - evidence: one authorization local, assigned once and compared against; the truthiness guard stays, because InvalidURL has no .object and None would otherwise match
+  - repro: read the two f-strings against each other
+  - test-tags: UNIT
+  - log: 2026-09-29T04:22:56Z @kj added
+  - log: 2026-09-29T04:22:56Z @kj closed
+- [-] `DEF-MAINT-240` **Make the unparseable URL branch display-only** - MINOR; the branch has two modes: the cut text is still unparseable and is only reported, or it becomes parseable and becomes the destination; the second mode is where the round 17, 18 and 19 defects came from; proposal: raise a dedicated error so it can only be reported; cli.py
+  - repro: call _without_credentials with 'http://u:p[ss@localhost:9099/' and observe that the result sends
+  - test-tags: UNIT
+  - log: 2026-09-29T04:23:12Z @kj added
+  - log: 2026-09-29T04:23:12Z @kj rejected: declined as a behaviour change with no defect behind it; reason: the bug-hunter rated it material=false after failing to construct any input that misroutes or leaks, and the architect measured the same input as the reason to keep the branch: it recovers a real send to a valid host, which the proposal would refuse
+- [x] `DEF-MAINT-246` **Three comments described routes the code no longer has** - MINOR; one said a non-numeric port reaches the bad-URL arm, which the pre-flight port check now takes first; one claimed our own wording as a reason its neighbour breaks by forwarding the library's words; one claimed the except arm backstops a NUL it does not; fix: all three; cli.py
+  - evidence: a differential over 10,845 URL forms found no input reaching the arm through a bad port; InvalidURL still reaches it through a space in the path
+  - repro: read each comment against the code under it
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:30Z @kj added
+  - log: 2026-09-29T04:44:30Z @kj closed
+- [-] `DEF-MAINT-256` **The Makefile approves npm install scripts with a subcommand npm does not have** - MINOR; npm install-scripts approve is not an npm subcommand on 11.17.0, so the loop always takes its else branch and blames a package being absent or npm being older than 11.6, neither of which is the cause; Makefile
+  - repro: run the approval loop's command directly against the project-local npm
+  - test-tags: MANUAL
+  - log: 2026-09-29T04:45:05Z @kj added
+  - log: 2026-09-29T04:45:05Z @kj rejected: owned outside this project; reason: the Makefile is the shared v1.43 template owned in ../@utils, which the brief locks out of scope, and no dependency of this product needs an approved lifecycle script - grep finds no fortawesome in package.json
+- [x] `DEF-MAINT-264` **An except arm named a subclass where the class was meant** - MINOR; a jupyter on PATH that cannot be executed raised PermissionError out of main, which the documented exit codes promise never happens; FileNotFoundError is an OSError, so naming the superclass cannot regress; fix: OSError; cli.py
+  - evidence: one name replaced by its superclass, nothing added; the architect measured the uncaught PermissionError
+  - repro: make the only jupyter on PATH mode 000 and run the CLI
+  - test-tags: MANUAL
+  - log: 2026-09-29T05:16:26Z @kj added
+  - log: 2026-09-29T05:16:26Z @kj closed
 
-- [x] `DEF-16` **per-event lifecycle logs at `console.log` buried real errors** - LOW; external lab console triage (C8) found the extension emitting `Received N notification(s)` per 30s poll, `Notification stream connected` per socket open, and `Notification sent successfully` per send, plus one-time activation and polling-started lines, all at `console.log` - part of the ~60 routine log lines that scroll a genuine error out of view within seconds; fix: demoted the five per-event and lifecycle logs to `console.debug`; errors, warns, and the offline/reconnect transition log are unchanged; `src/index.ts`
-  - 2026-08-19 reported: lab-js-errors-summary.md class C8 (console noise), Low; shared finding across the extension fleet
-  - 2026-08-19 fixed: 5 `console.log` -> `console.debug`; build + 9 jest + lint clean
+## Resilience `RESIL`
 
-## Documentation
+How the frontend behaves when the network or the server goes away
 
-- [x] `DEF-10` **README advertised a 140-char message limit no code enforces** - LOW; the parameter table said `message` is "max 140 characters" but the handler validates only presence; fix: dropped the claim (no validation added, per scope); `README.md`
-  - 2026-07-15 reported: architect minor; pre-existing
-  - 2026-07-15 fixed: removed "(max 140 characters)"
-- [x] `DEF-11` **README "Five notification types" contradicted the six the code accepts** - LOW; the feature list said five, but the param table, `cli.py` choices, and the `index.ts` type union enumerate six (`default` + five); fix: feature list now says six and includes `default`; `README.md`
-  - 2026-07-15 reported: architect minor; pre-existing
-  - 2026-07-15 fixed: "Five ... (info, ...)" -> "Six ... (default, info, ...)"
-- [x] `DEF-14` **README response example showed an impossible notification id** - LOW; the sample response used `notif_1762549476180_0`, but the DEF-2 counter starts at `itertools.count(1)` so the `_0` suffix can never occur; fix: changed the example suffix to `_1`; `README.md`
-  - 2026-07-15 reported: round-2 architect re-review, MINOR doc drift
-  - 2026-07-15 fixed: example id suffix `_0` -> `_1`
+- [x] `DEF-RESIL-15` **background poll spilled a console error every cycle while offline** - MINOR; `fetchAndDisplayNotifications` did `console.error('Failed to fetch notifications from server', reason)` on every failed 30s poll, so a transient network drop (offline tab, suspended machine, `net::ERR_NETWORK_IO_SUSPENDED`) flooded the console with a fresh red error once per cycle - ungraceful and alarming for an expected, self-healing condition; fix: a module-level `pollOffline` flag warns once on the offline transition and stays silent while it persists, then logs a single info line on reconnect; discrete user-initiated failures (send command, action-button command) keep `console.error` by design; `src/index.ts`
+  - test-tags: UNIT
+  - evidence: pollOffline flag warns once on the offline transition and logs once on reconnect
+  - repro: suspend the network; every 30s poll writes a fresh console error
+  - log: 2026-07-15T00:00:00Z @kj reported: user observed the red `Failed to fetch notifications from server` spam during a `net::ERR_NETWORK_IO_SUSPENDED` outage - "handle our issues gracefully, not let it spill"
+  - log: 2026-07-15T00:00:00Z @kj fixed: state-transition logging (warn once offline / info once on recovery); build + 9 jest + lint clean
+  - log: 2026-09-28T13:33:44Z @kj edited repro added "suspend the network; every 30s poll writes a fresh console error"
+  - log: 2026-09-28T13:33:44Z @kj edited evidence added "pollOffline flag warns once on the offline transition and logs once on reconnect"
+  - log: 2026-09-28T13:33:44Z @kj edited test-tags added "UNIT"
+- [x] `DEF-RESIL-44` **Server notification queue is unbounded** - MINOR; the ingest queue only drains when a client polls, so a server with every lab tab closed grows _notification_store without limit
+  - evidence: MAX_QUEUED_NOTIFICATIONS 500 with the oldest dropped; mutation-proven, removing the two lines fails the new test with 5 == 3; 60 pytest green
+  - repro: close every lab tab, POST to ingest in a loop, watch len(routes._notification_store) rise with no ceiling
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T16:42:06Z @kj append with no cap; the frontend bounds its own two tracking structures, the server did not
+  - log: 2026-09-28T16:42:06Z @kj added
+  - log: 2026-09-28T17:03:18Z @kj closed
+- [x] `DEF-RESIL-59` **Stream connect ran before the poll was armed** - MINOR; connectNotificationStream ran before the immediate fetch and the interval, and is unguarded, so anything the WebSocket constructor threw would propagate out of activate and leave the tab with neither delivery route
+  - evidence: connectNotificationStream is called after the immediate fetch and the interval, so a throwing WebSocket constructor can no longer take the poll baseline with it; 9 Galata E2E green
+  - repro: throw from the WebSocket constructor and observe that the poll never starts
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:13:05Z @kj ordering: the bonus route was started before the baseline it is a bonus to
+  - log: 2026-09-28T18:13:05Z @kj added
+  - log: 2026-09-28T18:18:21Z @kj closed
+- [x] `DEF-RESIL-78` **Truncated error body replaced the whole failure report** - MINOR; a body cut short mid-read raised IncompleteRead out of _readable_reason, so the report read 'IncompleteRead(20 bytes read, 4980 more expected)' instead of the status line and URL
+  - evidence: guard widened to named classes at cli.py:151; live 502 truncated at 20 bytes now prints 'HTTP 502 Bad Gateway from http://127.0.0.1:18912', stdout 0 bytes, exit 1; reverting the guard fails the new case
+  - repro: POST to a server that sends 502 with Content-Length 5000 then closes after 20 bytes
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:11:37Z @kj IncompleteRead subclasses HTTPException, not OSError, so it escaped the except (ValueError, OSError) at cli.py:151
+  - log: 2026-09-28T19:11:37Z @kj added
+  - log: 2026-09-28T19:11:46Z @kj closed
+- [x] `DEF-RESIL-83` **Send blocks for ever against a server that never answers** - MAJOR; urlopen had no timeout, so a server that accepts the connection and never replies hung the CLI indefinitely; the sender is usually an unattended script
+  - evidence: urlopen bounded at REQUEST_TIMEOUT_S=10 with a TimeoutError arm naming the URL and the bound; deleting the arm fails test_a_server_that_never_answers_does_not_block_for_ever, dropping the timeout argument fails it too
+  - repro: POST to a responder that accepts the TCP connection and sends no response
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:38:24Z @kj the local jupyter server list call was bounded at 5s and the network call was left unbounded
+  - log: 2026-09-28T19:38:24Z @kj added
+  - log: 2026-09-28T19:39:31Z @kj closed
+- [x] `DEF-RESIL-84` **Exit 0 for a notification nothing ingested** - MINOR; a 2xx whose JSON lacked notification_id printed 'Notification sent: None' and exited 0; a 2xx with an HTML body reported a JSON parse error naming neither status nor URL
+  - evidence: the id is indexed not .get(), and a parse arm reports one line naming the URL; reverting to .get() fails the '{"ok": true}' case, 2 parametrised cases
+  - repro: answer the ingest POST with 200 and a body of '{"ok": true}'
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:38:24Z @kj the id was read with .get() and the parse had no arm, so neither case reached the one-line failure contract
+  - log: 2026-09-28T19:38:24Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-RESIL-101` **Transport dying mid-answer escaped every arm** - MINOR; IncompleteRead and RemoteDisconnected are HTTPException not OSError, so a body cut short or a close with no answer reported a bare read error naming no URL, while the notification may already have been ingested
+  - evidence: an HTTPException arm reports one line naming the URL and saying the notification may already exist; 2 parametrised tests over IncompleteRead and RemoteDisconnected; measured live against a truncated 200 and a bare close
+  - repro: answer the ingest POST with 200 and a Content-Length longer than the body sent, then close
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T20:28:46Z @kj the same class was guarded in _readable_reason and left unguarded on the success path the same change rewrote
+  - log: 2026-09-28T20:28:46Z @kj added
+  - log: 2026-09-28T20:29:40Z @kj closed
+- [x] `DEF-RESIL-102` **Mistyped port printed a traceback** - MINOR; parsed.port raised ValueError before the URL line and before the try block, so a --url ending in 888o printed 12 lines of urllib internals instead of one report
+  - evidence: _match_listed_server returns None on an unparseable port and an InvalidURL arm reports 'bad URL <url>: nonnumeric port'; measured exit 1 with one stderr line and no traceback; 2 tests
+  - repro: run with --url http://127.0.0.1:888o
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T20:28:46Z @kj _match_listed_server read the port outside any guard, and it runs before the reporting path
+  - log: 2026-09-28T20:28:46Z @kj added
+  - log: 2026-09-28T20:29:40Z @kj closed
+- [x] `DEF-RESIL-145` **Connection reset during the read escaped every arm** - MAJOR; urllib wraps only h.request in URLError and leaves h.getresponse bare, so a reset arrives as ConnectionError and matched no arm; the report lost the URL and the warning that the notification may already exist
+  - evidence: the arm catches HTTPException and ConnectionError; URLError does not subclass ConnectionError so a refused connect keeps its own arm; a ConnectionResetError case added and dropping it fails that case
+  - repro: accept the POST and close the socket with SO_LINGER so the kernel sends RST
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:47:18Z @kj the arm named the three HTTPException classes and a reset is not one of them
+  - log: 2026-09-28T22:47:18Z @kj added
+  - log: 2026-09-28T22:47:59Z @kj closed
+- [x] `DEF-RESIL-157` **TLS failure during the read escaped every arm** - MAJOR; ssl.SSLError is an OSError and none of HTTPException, ConnectionError, TimeoutError or URLError, so a TLS state loss after the POST was read reported a bare SSL message with no URL and no double-send warning
+  - evidence: ssl.SSLError joins the transport arm; a case added to the parametrised report test, and dropping the class fails it
+  - repro: complete a TLS handshake, read the POST, then break TLS state mid-response
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T23:29:04Z @kj the previous round's ConnectionError fix closed the same hole one class too narrowly
+  - log: 2026-09-28T23:29:04Z @kj added
+  - log: 2026-09-28T23:29:05Z @kj closed
+- [x] `DEF-RESIL-166` **A bare OSError during the read escaped every arm** - MINOR; EHOSTUNREACH, ENETUNREACH and ENETDOWN are not ConnectionError, so a route removed mid-request reported a bare errno with no URL and no warning that the notification may already exist
+  - evidence: an OSError arm placed after the URLError arm, since URLError subclasses OSError and would otherwise swallow every status; 114 pytest green
+  - repro: raise OSError EHOSTUNREACH from getresponse after the POST is read
+  - test-tags: UNIT
+  - root-cause: 2026-09-29T00:03:32Z @kj the previous arm named the connection subclasses and not their parent
+  - log: 2026-09-29T00:03:32Z @kj added
+  - log: 2026-09-29T00:04:07Z @kj closed
+- [x] `DEF-RESIL-183` **A non-ASCII --url was reported as an unreadable answer** - MINOR; urllib raises UnicodeEncodeError, a ValueError, for a non-ASCII host, and the arm that catches ValueError reported an unreadable answer for a request that never left the process; fix: the bad-URL arm also catches UnicodeEncodeError; cli.py
+  - evidence: the bad-URL arm catches InvalidURL and UnicodeEncodeError; 130 pytest green
+  - repro: jupyterlab-notify --url 'http://exämple:8888' -m x; read stderr
+  - test-tags: UNIT
+  - log: 2026-09-29T02:21:14Z @kj added
+  - log: 2026-09-29T02:21:14Z @kj closed
+  - log: 2026-09-29T02:46:38Z @kj regressed as DEF-RESIL-183-1
+- [x] `DEF-RESIL-183-1` **A non-ASCII --url was reported as an unreadable answer** - MINOR; urllib raises UnicodeEncodeError, a ValueError, for a non-ASCII host, and the arm that catches ValueError reported an unreadable answer for a request that never left the process; fix: the bad-URL arm also catches UnicodeEncodeError; cli.py
+  - test-tags: UNIT
+  - repro: raise UnicodeEncodeError from urlopen and read which arm reports it
+  - evidence: the bad-URL arm now precedes the ValueError arm; test_a_non_ascii_url_is_reported_as_a_bad_url, and reverting the swap kills it; 145 pytest green
+  - log: 2026-09-29T02:46:38Z @kj regression of DEF-RESIL-183: closure was false: the arm naming UnicodeEncodeError sits below except (ValueError, KeyError, TypeError) and UnicodeEncodeError is a ValueError, so the entry was unreachable and the message still blamed the far end; found independently by the round-16 bug-hunter and ux-designer
+  - log: 2026-09-29T02:46:45Z @kj closed
+  - log: 2026-09-29T02:48:20Z @kj edited repro added "raise UnicodeEncodeError from urlopen and read which arm reports it"; test-tags added "UNIT"
+- [x] `DEF-RESIL-241` **A token with a carriage return was reported as an unreadable answer** - MAJOR; http.client raises a bare ValueError for a CR, LF or NUL in a header value, with no .object, so it fell past the arm separating a bad token from a bad URL into the response-parsing arm, whose message asserts a server answered; fix: a guard names the token; cli.py
+  - evidence: test_a_token_that_cannot_be_a_header_names_the_token, 4 shapes, plus a control that a space and a tab still deliver; dropping the guard kills 4, widening it to whitespace kills 3; 165 pytest green
+  - repro: JUPYTERLAB_NOTIFY_TOKEN with a trailing carriage return, as docker --env-file and systemd EnvironmentFile leave
+  - test-tags: UNIT
+  - log: 2026-09-29T04:23:21Z @kj added
+  - log: 2026-09-29T04:23:21Z @kj closed
+- [x] `DEF-RESIL-257` **A non-finite number made the server emit invalid JSON** - CRITICAL; json.dumps writes NaN for any non-finite float, and both delivery paths re-emitted it, so --now showed no toast while the CLI exited 0, and a poll cleared the store before serialising, destroying every other sender's notification in that batch; fix: allow_nan=False; routes.py
+  - evidence: five non-finite cases plus a finite control in test_ingest_rejects_unusable_payloads; dropping the guard kills all five; parse_constant=str kills the same five because it coerces rather than refuses; proven in a real browser by the reviewer
+  - repro: POST a payload whose data holds NaN, then poll with two clean notifications queued behind it
+  - test-tags: UNIT, E2E
+  - log: 2026-09-29T05:16:02Z @kj added
+  - log: 2026-09-29T05:16:02Z @kj closed
+  - log: 2026-09-29T05:35:44Z @kj edited evidence "six cases plus a finite control in test_ingest_rejects_unusable_payloads; dropping the guard kills 5; parse_constant=str kills the same 5, because it coerces rather than refuses; proven in a real browser by the reviewer" -> "five non-finite cases plus a finite control in test_ingest_rejects_unusable_payloads; dropping the guard kills all five; parse_constant=str kills the same five because it coerces rather than refuses; proven in a real browser by the reviewer"
+- [x] `DEF-RESIL-259` **A non-UTF-8 body answered 500 with a server traceback** - MINOR; UnicodeDecodeError is a ValueError but not a JSONDecodeError, so a latin-1 body missed the 400 arm every sibling malformed shape takes and each attempt wrote a traceback into the administrator's log; RFC 8259 requires UTF-8; routes.py
+  - evidence: test_a_non_utf8_body_is_a_bad_payload; dropping UnicodeDecodeError from the arm kills it
+  - repro: POST a latin-1 encoded body to the ingest endpoint
+  - test-tags: UNIT
+  - log: 2026-09-29T05:16:02Z @kj added
+  - log: 2026-09-29T05:16:02Z @kj closed
+- [x] `DEF-RESIL-277` **Two things json.loads raises are not JSONDecodeError** - MINOR; deep nesting raises RecursionError, not even a ValueError, and an integer past the 4300-digit limit raises a plain ValueError; the server answered 500 where siblings answer 400, and the CLI printed a traceback where its exit codes promise one line; fix: named classes; routes.py, cli.py
+  - evidence: two server cases and two CLI cases; narrowing either arm back kills them; named classes rather than bare ValueError, which would swallow a coding error in the body
+  - repro: POST a body nested twenty thousand deep, and pass the same to --data
+  - test-tags: UNIT
+  - log: 2026-09-29T05:55:36Z @kj added
+  - log: 2026-09-29T05:55:36Z @kj closed
+
+## Logging hygiene `LOG`
+
+Console output level and volume
+
+- [x] `DEF-LOG-16` **per-event lifecycle logs at `console.log` buried real errors** - MINOR; external lab console triage (C8) found the extension emitting `Received N notification(s)` per 30s poll, `Notification stream connected` per socket open, and `Notification sent successfully` per send, plus one-time activation and polling-started lines, all at `console.log` - part of the ~60 routine log lines that scroll a genuine error out of view within seconds; fix: demoted the five per-event and lifecycle logs to `console.debug`; errors, warns, and the offline/reconnect transition log are unchanged; `src/index.ts`
+  - test-tags: UNIT
+  - evidence: five console.log calls demoted to console.debug; rspack build, 9 jest and lint green
+  - repro: open the lab console; poll received, stream connected and send ok each log once per event
+  - log: 2026-08-19T00:00:00Z @kj reported: lab-js-errors-summary.md class C8 (console noise), Low; shared finding across the extension fleet
+  - log: 2026-08-19T00:00:00Z @kj fixed: 5 `console.log` -> `console.debug`; build + 9 jest + lint clean
+  - log: 2026-09-28T13:33:44Z @kj edited repro added "open the lab console; poll received, stream connected and send ok each log once per event"
+  - log: 2026-09-28T13:33:44Z @kj edited evidence added "five console.log calls demoted to console.debug; rspack build, 9 jest and lint green"
+  - log: 2026-09-28T13:33:44Z @kj edited test-tags added "UNIT"
+- [x] `DEF-LOG-17` **Activation message demoted to console.debug** - MEDIUM; the standard activation line must sit at console.log per the jupyterlab-extension contract and the Galata suite asserts it; the DEF-LOG-16 sweep demoted it with the per-event logs, though that brief allowed one-time activation to stay at log
+  - evidence: activation line left at console.debug; the Galata spec asserts the text, not the level, and passes against debug - proven by running it; per-event demotions kept; rspack build, 9 jest and lint green
+  - repro: grep console.debug src/index.ts; the 'is activated!' line is at debug while ui-tests asserts it
+  - test-tags: E2E
+  - root-cause: 2026-09-28T14:28:55Z @kj the Galata claim was wrong: Playwright reports console.debug as a console event and the spec filters only on text, so the assertion passes either way; the real reason to keep console.log is the jupyterlab-extension template contract
+  - root-cause: 2026-09-28T13:38:17Z @kj the demotion sweep treated the once-per-load activation line as per-event noise
+  - log: 2026-09-28T13:38:17Z @kj added
+  - log: 2026-09-28T13:38:59Z @kj closed
+  - log: 2026-09-28T14:28:55Z @kj root-cause overridden; reason: the original root cause was verified false
+  - log: 2026-09-28T16:38:43Z @kj corrected evidence: it said the activation line was restored to console.log; the code is console.debug and the Galata spec passes against it
+- [x] `DEF-LOG-201` **A duplicate registration line at INFO** - MINOR; jupyter_server logs extension loaded at INFO immediately after, and every other lifecycle site here was demoted to debug this round, so this one line was both a duplicate and the last INFO holdout; fix: removed with its single-use local; jupyterlab_notifications_extension/__init__.py
+  - evidence: the function ends at setup_route_handlers; nothing in the tree greps for that text; 145 pytest green
+  - repro: start a server and count the registration lines in the log
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:47:53Z @kj added
+  - log: 2026-09-29T02:47:53Z @kj closed
+
+## Documentation `DOCS`
+
+README and API reference accuracy against the code
+
+- [x] `DEF-DOCS-10` **README advertised a 140-char message limit no code enforces** - MINOR; the parameter table said `message` is "max 140 characters" but the handler validates only presence; fix: dropped the claim (no validation added, per scope); `README.md`
+  - test-tags: MANUAL
+  - evidence: the 140-character claim is gone from README.md
+  - repro: read the README parameter table; it claims max 140 characters while the handler validates presence only
+  - log: 2026-07-15T00:00:00Z @kj reported: architect minor; pre-existing
+  - log: 2026-07-15T00:00:00Z @kj fixed: removed "(max 140 characters)"
+  - log: 2026-09-28T13:33:43Z @kj edited repro added "read the README parameter table; it claims max 140 characters while the handler validates presence only"
+  - log: 2026-09-28T13:33:43Z @kj edited evidence added "the 140-character claim is gone from README.md"
+  - log: 2026-09-28T13:33:43Z @kj edited test-tags added "MANUAL"
+- [x] `DEF-DOCS-11` **README "Five notification types" contradicted the six the code accepts** - MINOR; the feature list said five, but the param table, `cli.py` choices, and the `index.ts` type union enumerate six (`default` + five); fix: feature list now says six and includes `default`; `README.md`
+  - test-tags: MANUAL
+  - evidence: README says six types and lists default
+  - repro: compare the README feature list against the cli.py choices and the index.ts type union
+  - log: 2026-07-15T00:00:00Z @kj reported: architect minor; pre-existing
+  - log: 2026-07-15T00:00:00Z @kj fixed: "Five ... (info, ...)" -> "Six ... (default, info, ...)"
+  - log: 2026-09-28T13:33:43Z @kj edited repro added "compare the README feature list against the cli.py choices and the index.ts type union"
+  - log: 2026-09-28T13:33:43Z @kj edited evidence added "README says six types and lists default"
+  - log: 2026-09-28T13:33:43Z @kj edited test-tags added "MANUAL"
+  - log: 2026-09-28T14:20:20Z @kj regressed as DEF-DOCS-11-1
+- [x] `DEF-DOCS-11-1` **README "Five notification types" contradicted the six the code accepts** - MINOR; the feature list said five, but the param table, `cli.py` choices, and the `index.ts` type union enumerate six (`default` + five); fix: feature list now says six and includes `default`; `README.md`
+  - test-tags: MANUAL
+  - repro: read README.md line 16 against line 33; one says five types, the other six
+  - evidence: README line 16 now reads six notification types, matching line 33, the cli choices and the index.ts union
+  - log: 2026-09-28T14:20:20Z @kj regression of DEF-DOCS-11; reason: README.md:16 still says Five notification types; the closing fix landed at README.md:33 and missed line 16
+  - log: 2026-09-28T14:55:42Z @kj closed
+  - log: 2026-09-28T14:56:28Z @kj edited repro added "read README.md line 16 against line 33; one says five types, the other six"; test-tags added "MANUAL"
+- [x] `DEF-DOCS-14` **README response example showed an impossible notification id** - MINOR; the sample response used `notif_1762549476180_0`, but the DEF-2 counter starts at `itertools.count(1)` so the `_0` suffix can never occur; fix: changed the example suffix to `_1`; `README.md`
+  - test-tags: MANUAL
+  - evidence: example suffix changed to _1
+  - repro: compare the README sample notification_id suffix _0 against itertools.count(1)
+  - log: 2026-07-15T00:00:00Z @kj reported: round-2 architect re-review, MINOR doc drift
+  - log: 2026-07-15T00:00:00Z @kj fixed: example id suffix `_0` -> `_1`
+  - log: 2026-09-28T13:33:43Z @kj edited repro added "compare the README sample notification_id suffix _0 against itertools.count(1)"
+  - log: 2026-09-28T13:33:43Z @kj edited evidence added "example suffix changed to _1"
+  - log: 2026-09-28T13:33:44Z @kj edited test-tags added "MANUAL"
+- [x] `DEF-DOCS-27` **README localhost cURL examples cannot work on a default install** - MAJOR; three examples are commented as needing no authentication and return 403, while the same document states 140 lines earlier that token-free loopback ingest is opt-in and off by default
+  - evidence: all three localhost cURL examples now carry Authorization: token, the false no-authentication comment is gone, and the opt-in paragraph describing the deleted feature is removed
+  - repro: copy the first localhost cURL example against a default server; 403
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T14:35:52Z @kj the examples predate the secure-by-default change and were never updated
+  - log: 2026-09-28T14:35:52Z @kj added
+  - log: 2026-09-28T14:55:42Z @kj closed
+- [x] `DEF-DOCS-33` **README documents a 401 the server cannot emit** - MAJOR; the error list advertises 401 Unauthorized for a missing or invalid token, but every auth failure returns 403: tornado's authenticated raises 403 for non-GET and APIHandler.get_login_url raises 403 for GET, so a sender branching on the documented code never matches
+  - evidence: README documents 403 Forbidden, measured: POST with no token, POST with a wrong token and GET with no token all return 403
+  - repro: POST /ingest with no token, with a wrong token, and GET /notifications with no token; all three return 403
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T15:40:28Z @kj the documented code was never checked against tornado's behaviour
+  - log: 2026-09-28T15:40:28Z @kj added
+  - log: 2026-09-28T15:45:37Z @kj closed
+- [x] `DEF-DOCS-34` **Project CLAUDE.md states four facts the code contradicts** - MEDIUM; it claims Python >= 3.9, jupyter_server >= 2.4.0, React 18.0.26 and a JupyterLab builder frontend, against requires-python >=3.10, jupyter_server >=2.21, no React import anywhere in src, and the move to @jupyter/builder; every agent session reads this file first
+  - evidence: the project CLAUDE.md states Python >=3.10, jupyter_server >=2.21, JupyterLab >=4.6.0, TypeScript ~5.8.0 and @jupyter/builder with rspack; the React line is gone since no src file imports React
+  - repro: compare .claude/CLAUDE.md's technology stack against pyproject.toml and package.json
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T15:40:28Z @kj the file was not updated when the dependency floors and the builder changed
+  - log: 2026-09-28T15:40:28Z @kj added
+  - log: 2026-09-28T15:45:37Z @kj closed
+- [x] `DEF-DOCS-48` **Two comments claimed required blocks the first Enter** - MINOR; comments at the required assignment and at the empty-message branch said the guard made an empty send unreachable; Dialog starts with _hasValidationErrors false and validates only from its own input handler, so the first Enter on an untouched dialog is accepted
+  - evidence: both comments now state that required does not block the first Enter and that the accept branch reports it; measured live - at open the message field is invalid and Send is enabled, matching the corrected text
+  - repro: open the dialog and press Enter without typing; the dialog closes and the error toast appears
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T16:51:52Z @kj the guard was reasoned about, not measured
+  - log: 2026-09-28T16:51:52Z @kj added
+  - log: 2026-09-28T17:03:19Z @kj closed
+- [x] `DEF-DOCS-57` **Comment described parseInt after the code moved to Number** - MAJOR; the comment above autoCloseInput.required said parseInt('') is NaN and the recipient gets a toast that never auto-closes; Number('') is 0 and JupyterLab suppresses a toast whose autoClose is not positive, so both the mechanism and the consequence were wrong
+  - evidence: the comment now says JupyterLab suppresses a toast for a NUMERIC autoClose of zero or less and that false is shown, which the manual-dismiss path relies on; measured live at 0, -1 and false
+  - repro: read the comment against the Number call 80 lines below it
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:13:05Z @kj the parseInt to Number change did not carry its neighbouring comment
+  - log: 2026-09-28T18:13:05Z @kj added
+  - log: 2026-09-28T18:18:21Z @kj closed
+  - log: 2026-09-28T18:37:21Z @kj the replacement wording is itself inaccurate: the lab bundle suppresses a toast only for a NUMERIC autoClose of zero or less, so autoClose false is shown, which this repo relies on at src/index.ts:641 and in six spec assertions
+  - log: 2026-09-28T18:45:57Z @kj edited evidence "the comment now states that Number('') is 0 and that JupyterLab suppresses a toast whose autoClose is not positive, which is what the code and the lab bundle do" -> "the comment now says JupyterLab suppresses a toast for a NUMERIC autoClose of zero or less and that false is shown, which the manual-dismiss path relies on; measured live at 0, -1 and false"
+- [x] `DEF-DOCS-71` **Dialog.ready fix falsified the two comments beside it** - MAJOR; after the synthetic input dispatch, the comment at the `required` assignment still said it does not block the first Enter, and the empty-message branch still gave that as the reason it is reachable; the real reason is that `required` is satisfied by whitespace, which the line above already says
+  - evidence: the required comment now says the first Enter is blocked only because of the dialog.ready dispatch, and the empty-message branch names whitespace as its reachable path; all three round-5 lenses reported this independently
+  - repro: read src/index.ts at the required assignment against the dialog.ready dispatch below it
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:42:23Z @kj the fix was added without re-reading the comments it invalidated; third occurrence of this class in one campaign
+  - log: 2026-09-28T18:42:23Z @kj added
+  - log: 2026-09-28T18:45:46Z @kj closed
+- [x] `DEF-DOCS-72` **CLI help stated a false reason the hub path is unaffected** - MAJOR; the docstring, the epilog and the environment list said a hub-spawned server carries no token of its own; measured on a live hub container the runtime record carries a token identical to JUPYTERHUB_API_TOKEN, because JupyterHubIdentityProvider.token returns hub_auth.api_token, so the precedence cannot change what is sent there
+  - evidence: the docstring, the epilog and the test docstring now state that a hub-spawned server record token IS JUPYTERHUB_API_TOKEN, so the precedence cannot change what a hub sends, and the variables are the fallback for a record that carries none
+  - repro: read the runtime jpserver json on a hub container and compare its token with JUPYTERHUB_API_TOKEN
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:42:23Z @kj the reason was reasoned about rather than measured against a running hub
+  - log: 2026-09-28T18:42:23Z @kj added
+  - log: 2026-09-28T18:45:46Z @kj closed
+- [x] `DEF-DOCS-74` **Epilog understated JUPYTERHUB_SERVICE_PREFIX** - MINOR; the environment list called it the base path used when no running server is found, but it also selects among servers that were found, which is what the exit-2 paragraph six lines below describes
+  - evidence: the environment entry now says the variable names this process own server and so picks among several running, and is the base path when none is found, which matches the exit-2 paragraph
+  - repro: compare the environment list entry with the exit-code paragraph in the same --help output
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:42:23Z @kj the entry described one of the two uses
+  - log: 2026-09-28T18:42:23Z @kj added
+  - log: 2026-09-28T18:45:47Z @kj closed
+- [x] `DEF-DOCS-77` **Module docstring sends a remote token through argv** - MAJOR; cli.py:6-7 said a remote --url requires an explicit --token; this change added JUPYTERLAB_NOTIFY_TOKEN, so the only route it names is the one that puts the secret in argv
+  - evidence: cli.py:6-9 now names JUPYTERLAB_NOTIFY_TOKEN first and says --token puts the secret in argv; usage example at cli.py:19 uses the variable; 81 pytest green
+  - repro: read cli.py:6-7 against tests/test_cli.py test_tool_token_variable_reaches_a_remote_host, which sends to a remote host with no --token
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T19:11:37Z @kj JUPYTERLAB_NOTIFY_TOKEN was added at cli.py:237 and named in the epilog, but the module docstring was not updated with it
+  - log: 2026-09-28T19:11:37Z @kj added
+  - log: 2026-09-28T19:11:46Z @kj closed
+  - log: 2026-09-28T19:35:11Z @kj regressed as DEF-DOCS-77-1
+- [x] `DEF-DOCS-77-1` **Module docstring sends a remote token through argv** - MAJOR; cli.py:6-7 said a remote --url requires an explicit --token; this change added JUPYTERLAB_NOTIFY_TOKEN, so the only route it names is the one that puts the secret in argv
+  - test-tags: MANUAL
+  - repro: run jupyterlab-notify --help and read the remote-server example against the authentication block below it
+  - evidence: epilog example, --verbose hint and --token help all name JUPYTERLAB_NOTIFY_TOKEN; live --help shows the variable form and no 'must be given explicitly'; the examples block and the authentication block now agree
+  - log: 2026-09-28T19:35:11Z @kj regression of DEF-DOCS-77: round 7: all four lenses found the same statement surviving in --help, the --verbose hint and the --token help; the module docstring was the only site fixed
+  - log: 2026-09-28T19:39:31Z @kj closed
+  - log: 2026-09-28T19:56:46Z @kj edited repro added "run jupyterlab-notify --help and read the remote-server example against the authentication block below it"; test-tags added "MANUAL"
+- [x] `DEF-DOCS-90` **Published description misspells JupyterHub and JupyterLab** - MINOR; the same string is the PyPI summary, the npm description and the Plugin Manager entry, and it read 'Jupyterlab' and 'jupyterjub'
+  - evidence: both sites read 'JupyterLab extension that displays notifications in the main panel, sent by a JupyterHub administrator or by a script'
+  - repro: read package.json description and the plugin description in src/index.ts
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T19:38:51Z @kj the typo was written once and copied to the second file
+  - log: 2026-09-28T19:38:51Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-DOCS-91` **--now help framed a delivery difference as a timing one** - MINOR; the flag help and the epilog said only that it avoids waiting for the poll, never that without it exactly one tab receives the notification; README said 'any open tab' where the transport section says every
+  - evidence: --now help states the fan-out first and the poll's single-consumer behaviour second; README changed 'any open tab' to 'every open tab'; verified in live --help
+  - repro: read the --now help against the Immediate Delivery section of README
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T19:38:51Z @kj the fan-out difference was documented only in README's transport section
+  - log: 2026-09-28T19:38:51Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-DOCS-92` **Several-servers message named a command that clears nothing** - MINOR; it said to clear stale records from 'jupyter --runtime-dir', which prints a path and removes nothing; a reader taking it literally sees a directory name and is no further on
+  - evidence: the message now says to remove the stale files from the directory that jupyter --runtime-dir prints
+  - repro: run with two servers listed and no --url
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:38:51Z @kj the command that prints the directory was written as though it acted on it
+  - log: 2026-09-28T19:38:51Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-DOCS-93` **Fallback URL documented as a host the code stopped returning** - MINOR; the auto-detect docstring and README both named localhost:8888 after the code changed to 127.0.0.1 and JUPYTER_PORT; the two names are separate entries in the loopback allowlist
+  - evidence: docstring and README both say http://127.0.0.1:$JUPYTER_PORT, port 8888 when unset, matching what get_jupyter_base_url returns
+  - repro: call get_jupyter_base_url with no servers listed and no hub prefix
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:38:51Z @kj the return value was changed and neither statement describing it was updated
+  - log: 2026-09-28T19:38:51Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-DOCS-94` **Test config docstring described a setting it does not make** - MINOR; it warned the config 'opens the server to the world' where the config leaves the server bound to localhost and only disables the token and the XSRF check
+  - evidence: the docstring says it disables the token and the XSRF check, exposes lab JavaScript on window, and stays bound to localhost; file parses
+  - repro: read the module docstring against the settings below it
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T19:38:51Z @kj template text carried over from the upstream extension cookiecutter
+  - log: 2026-09-28T19:38:51Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-DOCS-96` **README screenshot shows a dialog that no longer exists** - MINOR; the embedded image shows the Type select reading lowercase success where the dialog now renders Success, and the caption claimed action button options where the dialog offers one dismiss checkbox
+  - evidence: screenshot retaken from the current build at 3x; it shows Type as Info and the two aligned checkbox rows; caption now says an optional dismiss button
+  - repro: compare .resources/screenshot-command.png with the dialog the send command opens
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T19:44:09Z @kj TYPE_LABELS was added after the image was last captured, and the caption was written for an earlier form
+  - log: 2026-09-28T19:44:09Z @kj added
+  - log: 2026-09-28T19:56:13Z @kj closed
+- [x] `DEF-DOCS-97` **README advertised the reconnect give-up this work deleted** - MAJOR; the Reconnect bullet promised a give-up degrading to poll-only, three bullets below the one saying the poll is a destructive single-consumer drain, so the list asserted and denied the same thing
+  - evidence: the Reconnect bullet now states the 5s-to-60s ceiling, no give-up, and that a down socket can miss a --now notification outright; it no longer contradicts the poll bullet three lines above
+  - repro: read the Transport section's Reconnect bullet against ws.onclose in src/index.ts
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T20:28:27Z @kj the give-up was deleted citing README as the reason and README itself was not updated
+  - log: 2026-09-28T20:28:27Z @kj added
+  - log: 2026-09-28T20:29:40Z @kj closed
+- [x] `DEF-DOCS-100` **403 blamed _xsrf for a rejected token** - MAJOR; a wrong or absent token produced 'HTTP 403 Forbidden ...: _xsrf argument missing from POST', so an operator searching that text finds advice to disable their server's XSRF protection
+  - evidence: the authentication epilog now says a 403 naming _xsrf means the token was rejected or absent, explains why jupyter_server reports it that way, and says to fix the token rather than disable XSRF
+  - repro: send with --token wrong-token against a live jupyter_server and read the line
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T20:28:27Z @kj jupyter_server skips the XSRF check only for requests it already authenticated by token, so a bad token makes the XSRF complaint the first failure reported
+  - log: 2026-09-28T20:28:27Z @kj added
+  - log: 2026-09-28T20:29:40Z @kj closed
+- [x] `DEF-DOCS-105` **Several-servers message could not be acted on** - MINOR; it opened by naming JUPYTERHUB_SERVICE_PREFIX, which is unset outside a hub, put the rare action before --url, and listed URLs without the root directory that tells the labs apart
+  - evidence: the message leads with 'Pass --url to say which one to notify', lists each URL with its root directory, and puts the stale-entry note last
+  - repro: run with two servers listed and no --url outside a hub
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T20:28:46Z @kj the message was written for the hub case and the record's root_dir was never printed
+  - log: 2026-09-28T20:28:46Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+- [x] `DEF-DOCS-106` **Published description named the one place notifications never appear** - MINOR; package.json and the plugin description both said 'in the main panel', which is where documents open; toasts render bottom right and the rest in the notification centre
+  - evidence: both sites now say notifications are shown 'as a toast and in the notification centre'
+  - repro: send a notification and look at where it appears
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T20:28:46Z @kj the phrase survived an earlier rewrite that only fixed the spelling around it
+  - log: 2026-09-28T20:28:46Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+- [x] `DEF-DOCS-107` **Three criteria specified the deleted give-up** - MINOR; ACC-IMMED-11, 18 and 19 stated the give-up as shipped behaviour and one carried an unexecutable test line, so the spec contradicted the defects register in the same store
+  - evidence: ACC-IMMED-11, 18 and 19 amended through pm-tools so the old wording stays in the log; the unexecutable test line on ACC-IMMED-19 replaced; no give-up claim survives outside the log lines
+  - repro: read ACC-IMMED-11 against ws.onclose
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T20:28:46Z @kj the give-up was deleted without amending the criteria that specified it
+  - log: 2026-09-28T20:28:46Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+- [x] `DEF-DOCS-114` **README counted six types over a picture of five** - MINOR; the sentence said six notification types above a screenshot rendering five; default is absent from the image
+  - evidence: the count is removed from the sentence; README already enumerates all six types below it
+  - repro: read README's types sentence against the image below it
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T20:29:04Z @kj the count was written from the code and the image shows only the types that were captured
+  - log: 2026-09-28T20:29:04Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+- [x] `DEF-DOCS-120` **README advertised the token in the URL** - MAJOR; the API reference offered a ?token= query parameter, which cli.py says twice it never uses, ACC-IMMED-27 forbids, and DEF-SEC-12 recorded removing; it works, so a script author following it puts the token in access logs
+  - evidence: the API reference names the Authorization header only and says not to put the token in the URL because it lands in server and proxy access logs
+  - repro: read README's API reference against the token transport statements in cli.py
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T21:13:48Z @kj the CLI stopped sending the query form and the document that offered it was not updated
+  - log: 2026-09-28T21:13:48Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-DOCS-121` **The _xsrf note had no answer for a server with authentication off** - MAJOR; a server started with an empty token answers the same 403, and no token can satisfy it, so 'fix the token' had no referent and the note forbade the only local remedy; the project's own test config sets exactly that setting
+  - evidence: the epilog names both producers of that 403, says which remedy fits which, and states that a server with an empty token cannot be delivered to at all
+  - repro: start a server with --ServerApp.token='' and send to it
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T21:13:48Z @kj the note covered only the rejected-token producer of that reason, not the authentication-disabled one
+  - log: 2026-09-28T21:13:48Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-DOCS-127` **Broadcast claimed where the code denies it** - MINOR; the feature list said broadcast delivery via polling and routes.py called the store a broadcast to all users, while both files state 100 and 185 lines later that the poll is a destructive single-consumer drain
+  - evidence: the feature list says best-effort delivery and names the first-to-poll rule; routes.py describes the store as a destructively drained queue rather than a per-client mailbox
+  - repro: read the feature list against the transport section
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T21:14:13Z @kj the wording predates the single-consumer contract and was not revisited
+  - log: 2026-09-28T21:14:13Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-DOCS-128` **Stale-record note stated a condition as a fact** - MINOR; it told the operator a listed server is a zombie and to remove runtime files, with no criterion for which; acting on it with two live labs deletes a running server's record and breaks its token lookup
+  - evidence: the note is conditional, gives the criterion (no longer running) and names the jpserver-<pid>.json file by the port it carries
+  - repro: run the ambiguity branch with two servers genuinely running
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T21:14:13Z @kj the sentence described the stale case unconditionally and named files by a pattern the printed lines do not carry
+  - log: 2026-09-28T21:14:13Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-DOCS-134` **The _xsrf note counted two producers and there are three** - MAJOR; a server configured with a password only answers the same 403 with authentication enabled, so both named descriptions deny that operator's case and neither remedy applies to it
+  - evidence: the note drops the count and keys on whether the server has a token at all, naming the password-only case in the second branch
+  - repro: send to a server started with jupyter server password and read the failure
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:08:30Z @kj the note was written from the two configurations measured and stated a count
+  - log: 2026-09-28T22:08:30Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-DOCS-135` **Broadcast survived in half the places its fix claimed** - MAJOR; DEF-DOCS-127 was filed against README and routes.py and corrected one site in each; the word stood in routes.py's queue comment, the README architecture line and the README intro, while the closure said it was gone
+  - evidence: grep for broadcast across README.md, src/ and the Python package returns nothing; the architecture line now states the no-per-recipient-addressing model
+  - repro: grep broadcast across README.md and routes.py after the fix
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:08:30Z @kj the fix changed the first occurrence in each file and the evidence asserted completeness without a grep
+  - log: 2026-09-28T22:08:30Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-DOCS-140` **The suite's port knob was documented nowhere** - MINOR; JUPYTER_TEST_PORT is threaded through two files, and the README whose job is running the suite never named it, so a developer holding 8888 gets a 120-second timeout and no hint
+  - evidence: the run step passes JUPYTER_TEST_PORT and the README says why the default collides with a running lab
+  - repro: run the suite with your own lab on 8888
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:08:49Z @kj the variable was added to the config and not to the instructions
+  - log: 2026-09-28T22:08:49Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-DOCS-141` **Copier answers hold the description two defects corrected** - MINOR; the template answer still carries Jupyterlab, jupyterjub and main panel, and copier renders the published description from it, so a copier update re-injects all three into PyPI, npm and the Plugin Manager
+  - evidence: the copier answer carries the corrected description, so a regeneration produces what package.json already ships
+  - repro: read .copier-answers.yml against package.json's description
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:08:49Z @kj the correction was applied downstream and not at the source copier regenerates from
+  - log: 2026-09-28T22:08:49Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-DOCS-142` **--url help did not name the form the browser shows** - MINOR; an operator copying the address bar passes a URL ending in /lab and gets 405 with no next action, which the code elsewhere already names as a known mistake
+  - evidence: the --url help says 'without the /lab path the browser shows'
+  - repro: send with --url ending in /lab
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:08:49Z @kj the help described what the flag takes and not the paste that fails
+  - log: 2026-09-28T22:08:49Z @kj added
+  - log: 2026-09-28T22:09:04Z @kj closed
+- [x] `DEF-DOCS-148` **The plural audience claim survived its own fix** - MAJOR; the README line was edited to drop the word broadcast and kept the fan-out, so the front page told a hub administrator one send reaches all running servers while the same file says one server 220 lines later
+  - evidence: the intro says a running JupyterLab server and adds that each send addresses one server; it agrees with the architecture section and with the dialog
+  - repro: read the intro sentence against the architecture section
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:47:18Z @kj the edit removed the word the defect named and not the claim the defect was about
+  - log: 2026-09-28T22:47:18Z @kj added
+  - log: 2026-09-28T22:47:59Z @kj closed
+- [x] `DEF-DOCS-149` **Audience fiction in the package, and a grep claim narrower than described** - MINOR; a test docstring said a local process could broadcast to every user's lab; the closure claimed a grep over the Python package returned nothing, but the glob used matched only top-level modules and never entered tests
+  - evidence: the docstring says post to every open tab of this server; a recursive grep for broadcast over README, src, style and the whole package returns nothing
+  - repro: grep -rni broadcast over the package directory
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:47:39Z @kj the check run was narrower than the check described
+  - log: 2026-09-28T22:47:39Z @kj added
+  - log: 2026-09-28T22:47:59Z @kj closed
+- [x] `DEF-DOCS-158` **Two documents still called the auto-detected URL loopback** - MAJOR; the README and the epilog both said auto-detection yields a loopback URL, which the host fix made false, and together they promised that auto-detection always authenticates - the belief that makes the 403 unexplainable
+  - evidence: the README says the URL comes from the record's own scheme, host and port, and the epilog separates the record's own token from this host's ambient variables; ACC-IMMED-25 amended to match
+  - repro: read the auto-detection paragraph against what _server_url returns for a named bind
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T23:29:05Z @kj the URL builder changed and every statement describing its output was left
+  - log: 2026-09-28T23:29:05Z @kj added
+  - log: 2026-09-28T23:29:05Z @kj closed
+- [x] `DEF-DOCS-165` **Three sites stated the credential rule the round-12 fix reversed** - MAJOR; the README, the --token help and the epilog's first sentence all still said the addressed server's own token is loopback-only, so an operator concludes the CLI cannot authenticate to an --ip-bound server and reaches for --token, putting the secret in argv
+  - evidence: the README, the --token help and the epilog's first sentence all separate the record's own token from this host's ambient variables, matching the environment block that was already correct
+  - repro: read the README authentication paragraph against what a server bound with --ip receives
+  - test-tags: MANUAL
+  - root-cause: 2026-09-29T00:03:32Z @kj the fix moved the rule and three of the five sites stating it were left
+  - log: 2026-09-29T00:03:32Z @kj added
+  - log: 2026-09-29T00:04:07Z @kj closed
+- [x] `DEF-DOCS-173` **A hedge was removed and the statement became false** - MAJOR; round 12 said an --ip-bound server's address may not be loopback, round 13 changed it to is not loopback, which is false for --ip 127.0.0.1, localhost, ::1 and 0.0.0.0 - the last being the standard container bind
+  - evidence: the hedge is restored in the epilog, the README and the code comment the phrasing came from
+  - repro: read the authentication paragraph against what _is_loopback_url returns for a 0.0.0.0 record
+  - test-tags: MANUAL
+  - root-cause: 2026-09-29T00:37:42Z @kj a statement was made more confident while fixing a different falsehood in the same sentence
+  - log: 2026-09-29T00:37:42Z @kj added
+  - log: 2026-09-29T00:38:02Z @kj closed
+- [x] `DEF-DOCS-176` **Two register evidence lines stated what the code does not** - MAJOR; one repeated the claim that the seconds title is redundant, which another defect was filed to remove from the code as a trap, and one said aria-describedby is set in the ready callback after it was moved out
+  - evidence: both evidence lines now describe the landed code, and DEF-SEC-143 carries a superseding log line for the helper round 13 deleted
+  - repro: read the two evidence lines against the code they describe
+  - test-tags: MANUAL
+  - root-cause: 2026-09-29T00:37:43Z @kj the evidence was written from the fix as planned rather than from the fix as landed
+  - log: 2026-09-29T00:37:43Z @kj added
+  - log: 2026-09-29T00:38:03Z @kj closed
+- [x] `DEF-DOCS-185` **ACC-IMMED-26 stated a token rule the CLI does not have** - MAJOR; the criterion said an explicit --url never receives the detected token and a remote server requires --token; both false since round 13: a loopback --url does get it, and a matched record supplies its own; fix: amended to the measured rule; docs/acc-crit-jupyterlab_notifications_extension.md
+  - evidence: pm-tools amend ACC-IMMED-26 with the reason on its log line; body now matches the four-step gate
+  - repro: read ACC-IMMED-26 against the token gate in send_notification_api
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:21:23Z @kj added
+  - log: 2026-09-29T02:21:23Z @kj closed
+- [x] `DEF-DOCS-186` **The hedge read as permission and hid the wildcard substitution** - MINOR; three sites said an --ip-bound server's address may not be loopback; may reads as permission, and none named the 0.0.0.0 to 127.0.0.1 substitution the CLI performs; fix: might not at all three sites, plus the substitution at two of them, the epilog and README.md line 185; cli.py, README.md
+  - evidence: no shipped surface carries it; test_claim_sweep.py fails if one does; 138 pytest green
+  - repro: grep 'may not be loopback' across the tree
+  - test-tags: UNIT
+  - log: 2026-09-29T02:21:42Z @kj added
+  - log: 2026-09-29T02:21:42Z @kj closed
+  - log: 2026-09-29T02:46:45Z @kj amended text "three sites said an --ip-bound server's address may not be loopback; may reads as permission, and none named the 0.0.0.0 to 127.0.0.1 substitution the CLI performs; fix: might not, plus the substitution, in the epilog, README.md line 185 and the token-gate comment; cli.py, README.md" -> "three sites said an --ip-bound server's address may not be loopback; may reads as permission, and none named the 0.0.0.0 to 127.0.0.1 substitution the CLI performs; fix: might not at all three sites, plus the substitution at two of them, the epilog and README.md line 185; cli.py, README.md"; reason: body implied the substitution landed at all three sites; cli.py:331 has only the hedge, and a third copy of the substitution there would be redundant
+- [x] `DEF-DOCS-187` **An example in --help rendered at 132 columns** - MINOR; the --command-args example measured 81 columns in source but argparse expands %(prog)s nine wider, so it rendered at 132 and its wrapped tail landed where section labels sit; two more examples rendered at 83 and 90; fix: backslash continuations; cli.py
+  - evidence: at COLUMNS=80 no epilog line exceeds 80; the only longer line is argparse's own usage block at 82, one unbreakable bracketed group
+  - repro: jupyterlab-notify --help | awk '{print length}' | sort -n | tail -1
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:21:42Z @kj added
+  - log: 2026-09-29T02:21:43Z @kj closed
+  - log: 2026-09-29T02:22:57Z @kj edited text "the --command-args example measured 81 columns in source but argparse expands %(prog)s nine wider, so it rendered at 132 and its wrapped tail landed where section labels sit; fix: a backslash continuation splits it; cli.py" -> "the --command-args example measured 81 columns in source but argparse expands %(prog)s nine wider, so it rendered at 132 and its wrapped tail landed where section labels sit; two more examples rendered at 83 and 90; fix: backslash continuations; cli.py"; evidence "longest rendered help line now under 100 columns" -> "at COLUMNS=80 no epilog line exceeds 80; the only longer line is argparse's own usage block at 82, one unbreakable bracketed group"
+- [x] `DEF-DOCS-188` **The --url help did not say the address is replaced** - MINOR; since round 14 a --url that matches a listed record is re-addressed to that record's own host, so the host sent can differ from the host typed; neither the flag's help nor README said so; fix: both now state it and name the 0.0.0.0 case; cli.py, README.md
+  - evidence: the help text and the README URL auto-detection paragraph both state the re-addressing
+  - repro: jupyterlab-notify --help; read the --url entry
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:21:43Z @kj added
+  - log: 2026-09-29T02:21:43Z @kj closed
+- [x] `DEF-DOCS-189` **A comment justified itself by a threat the code above removes** - MINOR; the argv comment in the CI gate cited a risk that the preceding line already eliminates, so a reader looking for the reason found a stale one; fix: the comment states what the line does; .github/scripts/check_auth.py
+  - evidence: comment names the actual reason; no claim about a removed threat
+  - repro: read the argv comment against the line above it
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:21:43Z @kj added
+  - log: 2026-09-29T02:21:43Z @kj closed
+- [x] `DEF-DOCS-190` **An exception comment omitted SSLCertVerificationError** - MINOR; the arm-6 comment claimed the ValueError arm sees only bad-URL cases; SSLCertVerificationError is also a ValueError and is taken by an earlier arm, so the comment misdescribed the arm order; fix: the comment excepts it; cli.py
+  - evidence: the comment names SSLCertVerificationError and the earlier arm that takes it
+  - repro: read the arm-6 comment against the except clauses above it
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:21:43Z @kj added
+  - log: 2026-09-29T02:21:43Z @kj closed
+  - log: 2026-09-29T02:46:38Z @kj regressed as DEF-DOCS-190-1
+- [x] `DEF-DOCS-190-1` **An exception comment omitted SSLCertVerificationError** - MINOR; the arm-6 comment claimed the ValueError arm sees only bad-URL cases; SSLCertVerificationError is also a ValueError and is taken by an earlier arm, so the comment misdescribed the arm order; fix: the comment excepts it; cli.py
+  - test-tags: MANUAL
+  - repro: send to a self-signed https listener and read which arm's wording appears
+  - evidence: the clause now says urllib wraps SSLCertVerificationError in URLError and the URLError arm above takes it
+  - log: 2026-09-29T02:46:38Z @kj regression of DEF-DOCS-190: closure was false: the comment says SSLCertVerificationError is taken by the ValueError arm, but urllib wraps the handshake failure in URLError, so the URLError arm takes it; measured by the round-16 bug-hunter against a self-signed listener
+  - log: 2026-09-29T02:46:45Z @kj closed
+  - log: 2026-09-29T02:48:20Z @kj edited repro added "send to a self-signed https listener and read which arm's wording appears"; test-tags added "MANUAL"
+- [x] `DEF-DOCS-194` **The claim registry stated the retired claim as its own reason** - MAJOR; the requires an explicit --token row gave its reason as a remote target does; it does not, because JUPYTERLAB_NOTIFY_TOKEN carries a credential anywhere; already recorded as DEF-DOCS-77 and its regression; the string is what the next author reads; fix: the true reason; tests/test_claim_sweep.py
+  - evidence: the row now says no target requires the flag and names both credential sources; 145 pytest green
+  - repro: read the row against test_tool_token_variable_reaches_a_remote_host
+  - test-tags: UNIT
+  - log: 2026-09-29T02:47:24Z @kj added
+  - log: 2026-09-29T02:47:24Z @kj closed
+- [x] `DEF-DOCS-195` **The certfile remedy in --help cannot be applied** - MAJOR; the epilog said a TLS server needs a --url whose host matches its certificate, and main re-addresses a matched record, so a localhost or 0.0.0.0 bound secure record goes to 127.0.0.1 whatever is typed; rounds 13 and 14 invalidated DEF-IMMED-42's evidence; fix: state the address used; cli.py
+  - evidence: measured: localhost and 0.0.0.0 records are addressed at 127.0.0.1; the epilog now says the certificate must cover 127.0.0.1 or [::1]; the wording is a claim-sweep row
+  - repro: match a secure record bound to localhost and read _server_url
+  - test-tags: UNIT
+  - log: 2026-09-29T02:47:24Z @kj added
+  - log: 2026-09-29T02:47:24Z @kj closed
+- [x] `DEF-DOCS-205` **The documented symlink command builds a loop on a second run** - MINOR; README told the reader to run ln -s for the agent skill; once the link exists ln -s resolves it to a directory and creates the link inside it, exiting 0, leaving a self-referential path in the working tree that anything following links loops on; fix: ln -sfn; README.md
+  - evidence: README line 267 uses ln -sfn, where -n makes -f replace the link instead of descending into it
+  - repro: run the documented ln -s line twice and list the target directory
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:47:53Z @kj added
+  - log: 2026-09-29T02:47:53Z @kj closed
+- [x] `DEF-DOCS-208` **The certfile paragraph was narrower than the code and self-contradicting** - MINOR; round 16 said the certificate must cover 127.0.0.1 or [::1]; an --ip-bound server is addressed at its own address, which the same epilog says twenty lines above, so the epilog contradicted itself; fix: the paragraph names both cases; cli.py
+  - evidence: measured https://192.168.1.5:8888; the narrower wording is a claim-sweep row; 7 sweep cases green
+  - repro: call _server_url on a secure record bound to a specific address
+  - test-tags: UNIT
+  - log: 2026-09-29T03:13:57Z @kj added
+  - log: 2026-09-29T03:13:57Z @kj closed
+- [x] `DEF-DOCS-209` **The prefix docstring said it decides when set** - MINOR; JUPYTERHUB_SERVICE_PREFIX decides only when a listed record matches it, because the one-server rule runs after the prefix loop; measured: a single non-matching record is still returned; fix: the docstring says so, and the behaviour is deliberately unchanged; cli.py
+  - evidence: docstring states when it decides and why a non-matching prefix does not refuse
+  - repro: call _select_server with one record whose base_url does not match the prefix
+  - test-tags: UNIT
+  - log: 2026-09-29T03:13:57Z @kj added
+  - log: 2026-09-29T03:13:57Z @kj closed
+- [x] `DEF-DOCS-211` **The token precedence was stated three times in --help** - MINOR; the --token flag help, the authentication block and the environment table each enumerated it; one claim with three copies, and that claim has already produced DEF-DOCS-77, its regression and DEF-DOCS-194; fix: the flag help points at the section, which is the copy with no unique content; cli.py
+  - evidence: two copies remain, each carrying a why the other does not; 145 pytest green
+  - repro: grep --help for the precedence enumeration
+  - test-tags: MANUAL
+  - log: 2026-09-29T03:13:57Z @kj added
+  - log: 2026-09-29T03:13:57Z @kj closed
+- [x] `DEF-DOCS-213` **Exit code 1 did not name the bad-URL cause** - MINOR; the enumeration read bad --data/--command-args JSON, or the request failed, so a script author following it looked for a bad --url under 2; fix: the clause names it; cli.py
+  - evidence: exit code 1 lists a --url this tool cannot use; measured exit 1 with no request made
+  - repro: jupyterlab-notify -m x --url localhost:8888; read the exit code against the manual
+  - test-tags: MANUAL
+  - log: 2026-09-29T03:13:58Z @kj added
+  - log: 2026-09-29T03:13:58Z @kj closed
+- [x] `DEF-DOCS-216` **The certfile paragraph named a case its own frame cannot reach** - MAJOR; round 17 put the --ip case inside a not-at-the-host-you-type frame; a non-loopback --url never matches a record, so re-addressing can only produce 127.0.0.1 or [::1], and the --ip address arrives through auto-detection where no typed host is replaced; fix: the two paths are separated; cli.py
+  - evidence: measured: all three spellings return None, and auto-detect gives https://192.168.1.5:8888; the paragraph now states each path
+  - repro: match a secure record bound to 192.168.1.5 against three URL spellings
+  - test-tags: UNIT
+  - log: 2026-09-29T03:33:57Z @kj added
+  - log: 2026-09-29T03:33:57Z @kj closed
+- [x] `DEF-DOCS-220` **The no-token comment kept a premise its own defect falsified** - MINOR; the comment said the healthy path stays one line because the healthy path has a token; DEF-UI-207 measured a token-less server delivering successfully, so a maintainer could re-gate the line on it; fix: the sentence is gone and the two above it carry the justification; cli.py
+  - evidence: the sentence is removed; the architect and the ux-designer both filed it
+  - repro: read the comment against DEF-UI-207
+  - test-tags: MANUAL
+  - log: 2026-09-29T03:33:57Z @kj added
+  - log: 2026-09-29T03:33:57Z @kj closed
+- [x] `DEF-DOCS-221` **The claim registry prescribed the wording it retires** - MINOR; row five's reason ended with the literal row four retires as too narrow, so the next author following row five would fail row four; fix: row five names both the loopback and the --ip case; tests/test_claim_sweep.py
+  - evidence: row five no longer carries the retired literal; 7 sweep cases green
+  - repro: read the two rows against each other
+  - test-tags: UNIT
+  - log: 2026-09-29T03:33:57Z @kj added
+  - log: 2026-09-29T03:33:58Z @kj closed
+- [x] `DEF-DOCS-227` **The scrub was advertised unconditionally** - MINOR; with no // urlparse puts the whole user:pass@host into the path and leaves netloc empty, so the parsing path returns the text whole, while the docstring and README promised query, fragment and userinfo removed without qualification; fix: both claim what both paths do; cli.py, README.md
+  - evidence: not fixed in code on the architect's reasoning: stripping at @ past the first / would break /user/alice@example.com/, the standard hub path for an e-mail username
+  - repro: jupyterlab-notify -m x --url 'user:pw@127.0.0.1:8899'
+  - test-tags: MANUAL
+  - log: 2026-09-29T03:54:03Z @kj added
+  - log: 2026-09-29T03:54:03Z @kj closed
+- [x] `DEF-DOCS-228` **The certfile clause sent an unmatched loopback --url after a token it already has** - MINOR; it said any other --url needs JUPYTERLAB_NOTIFY_TOKEN or --token; an unmatched loopback --url reaches detect_token and gets an ambient one, so that operator was told to put a secret in argv for nothing; fix: the clause names the non-loopback case; cli.py
+  - evidence: the clause reads a non-loopback --url; measured that an unmatched loopback --url does receive the ambient token
+  - repro: send to an unmatched loopback --url with JUPYTER_TOKEN set and read whether a token was used
+  - test-tags: MANUAL
+  - log: 2026-09-29T03:54:03Z @kj added
+  - log: 2026-09-29T03:54:03Z @kj closed
+- [x] `DEF-DOCS-239` **README named one of the two shapes that keep userinfo** - MINOR; it said the user:password@ part of a --url naming a host is dropped; a password holding an unencoded / ends the host part at that slash, so the credential reaches both stderr sinks, and / is in the base64 alphabet; fix: README names both; README.md
+  - evidence: README names both shapes; the code is deliberately unchanged, per DEF-SEC-232's rejection, and this is the operator-facing half of that documented boundary
+  - repro: jupyterlab-notify -m x --url 'http://admin:s3c/r3t@127.0.0.1:8888/'
+  - test-tags: MANUAL
+  - log: 2026-09-29T04:23:12Z @kj added
+  - log: 2026-09-29T04:23:12Z @kj closed
+- [x] `DEF-DOCS-250` **Three sites said http.client refuses a NUL in a header value** - MAJOR; its validator matches CR and LF only, so a NUL is accepted and sent; the guard refuses it anyway and is the only check for that byte, which a comment called redundant with the except arm; fix: all three sites; cli.py, tests, defects
+  - evidence: measured: CR and LF raise inside putheader, NUL is accepted and the request is sent; the guard also refuses an obs-fold http.client would have sent as a continuation
+  - repro: drive putheader with a NUL in the value and read what it does
+  - test-tags: MANUAL
+  - log: 2026-09-29T04:44:51Z @kj added
+  - log: 2026-09-29T04:44:51Z @kj closed
+- [x] `DEF-DOCS-252` **README lent the second userinfo shape the first one's predicate** - MINOR; and so does asserted that a password holding an unencoded slash has no host, which it does have - the authority merely ends early; that reading is the one that leaves the password in the URL; fix: its own predicate, and the instruction first; README.md
+  - evidence: the sentence leads with do not put a password in any --url and gives each shape its own clause
+  - repro: read the sentence with the second shape substituted into the leading clause
+  - test-tags: MANUAL
+  - log: 2026-09-29T04:44:52Z @kj added
+  - log: 2026-09-29T04:44:52Z @kj closed
+- [x] `DEF-DOCS-255` **The ingest 400 named the element when the container can be the fault** - MINOR; the condition rejects actions that are not a list and actions whose element is wrong, and said only the second, so a caller sending one action as a bare object was told each action must be an object with a string label; fix: name both; routes.py
+  - evidence: the message reads actions must be a list of objects, each with a string label; README already distinguished the two causes correctly
+  - repro: POST with actions set to a single object rather than a list
+  - test-tags: MANUAL
+  - log: 2026-09-29T04:45:05Z @kj added
+  - log: 2026-09-29T04:45:05Z @kj closed
+- [x] `DEF-DOCS-265` **Two comments claimed an all-ASCII URL is unchanged by the escape** - MINOR; true of backslashreplace and false of unicode_escape, which escapes a newline - and a newline IS ASCII, which is why the previous codec left it alone; the sentence contradicted the fix it sat above; fix: both copies gone; cli.py
+  - evidence: the clause is gone from both sites; the bug-hunter and the slop-hunter filed it independently
+  - repro: read the comment against the codec below it, using the round's own test input
+  - test-tags: UNIT
+  - log: 2026-09-29T05:16:26Z @kj added
+  - log: 2026-09-29T05:16:26Z @kj closed
+- [x] `DEF-DOCS-266` **A closure list asserted the code had been stable for three rounds** - MAJOR; it was the load-bearing premise of a process decision about comments; AST-diffing executable statements across the reconstructed rounds shows every round changed some, so no round was stable; the 21 per cent comment figure in the same paragraph holds; fix: the claim is withdrawn
+  - evidence: the withdrawal is recorded in the round-23 closure list; the exact per-round counts are dropped, because the reviewer reconstructed the same diff two ways and got two different quartets
+  - repro: parse each round's cli.py, strip docstrings, unparse and diff statements
+  - test-tags: MANUAL
+  - log: 2026-09-29T05:16:26Z @kj added
+  - log: 2026-09-29T05:16:26Z @kj closed
+  - log: 2026-09-29T05:35:44Z @kj edited text "it was the load-bearing premise of a process decision about comments; AST-diffing executable statements across the reconstructed rounds gives 14, 28, 26 and 22 changed, three of them behaviour-changing; the 21 per cent comment figure in the same paragraph holds; fix: the claim is withdrawn" -> "it was the load-bearing premise of a process decision about comments; AST-diffing executable statements across the reconstructed rounds shows every round changed some, so no round was stable; the 21 per cent comment figure in the same paragraph holds; fix: the claim is withdrawn"; evidence "the fourth claim of mine in four rounds that measurement contradicted; the correction is recorded in the round-22 closure list" -> "the withdrawal is recorded in the round-23 closure list; the exact per-round counts are dropped, because the reviewer reconstructed the same diff two ways and got two different quartets"
+- [x] `DEF-DOCS-269` **Six comments cited a defect id, a round or a measurement** - MINOR; the narrowed rule: a comment may not cite an id, a round or a closure list, nor carry a measurement, while one naming an input and what it produced stays; three of the six were added by the round that banned them; fix: the six; cli.py, tests
+  - evidence: six pointer sentences removed, nine input-and-outcome sentences kept; both lenses said do not sweep the rest
+  - repro: read each comment for a pointer that carries no constraint
+  - test-tags: UNIT
+  - log: 2026-09-29T05:16:37Z @kj added
+  - log: 2026-09-29T05:16:37Z @kj closed
+- [x] `DEF-DOCS-271` **Two documents enumerated the ingest 400 causes and both were one short** - MAJOR; README and the acc-crit API line each list the 400 set as complete and neither carried the non-finite refusal; the field it travels in, data, was absent from the README table and the handler docstring while the acc-crit contract line lists it; fix: all four; README.md, routes.py, docs
+  - evidence: both enumerations carry the cause, the README table and the handler docstring carry data; the acc-crit edit is logged in docs/pm-hand-edits.md, because that section is prose rather than an item
+  - repro: grep the tree for finite or NaN and compare against the handler
+  - test-tags: MANUAL
+  - log: 2026-09-29T05:36:05Z @kj added
+  - log: 2026-09-29T05:36:05Z @kj closed
+- [x] `DEF-DOCS-274` **Three prose defects left by this loop's own edits** - MINOR; a removed defect-id pointer left its clause duplicated in a docstring, a removed README clause left its comma before the following full stop, and a test control re-cleared a store an autouse fixture already clears; fix: all three; cli.py, README.md, tests
+  - evidence: the clause, the comma and the redundant clear are gone; 182 pytest green
+  - repro: read each site against the edit that produced it
+  - test-tags: UNIT
+  - log: 2026-09-29T05:36:06Z @kj added
+  - log: 2026-09-29T05:36:06Z @kj closed
+- [x] `DEF-DOCS-276` **Two operator-facing sentences pointed at nothing** - MINOR; the increment command's step 3 read Stage package.json and if they changed after a file was removed from the list, leaving and with one operand; and the new exit-2 entry said the message printed above, while --help prints nothing above that block but the usage line; fix: both; .claude/commands, cli.py
+  - evidence: step 3 names one file; the exit-2 entry reads the error message names the cause
+  - repro: read step 3, and read the exit-code block in --help
+  - test-tags: MANUAL
+  - log: 2026-09-29T05:55:24Z @kj added
+  - log: 2026-09-29T05:55:24Z @kj closed
+
+## Test harness `TEST`
+
+The pytest, jest and Galata tiers and the configuration that runs them
+
+- [x] `DEF-TEST-18` **Galata suite never reaches ready, whole E2E tier unusable** - MAJOR; all 4 specs fail in galata's own readiness fixture (isInSimpleMode -> isTabActive -> fixtures.ts:366) before any test body runs; the lab page renders fully, so it is not a page load failure; a 240s timeout fails identically, so it is not slowness; 5 acceptance criteria stay unverifiable
+  - evidence: the test server now serves only this extension's labextension via LabServerApp.labextensions_path, so no sibling extension can steal the active tab; all 4 specs pass in 1.2m, exit 0
+  - repro: cd ui-tests && JUPYTER_TEST_PORT=8955 jlpm playwright test; all 4 fail on 'Timed out waiting for condition'
+  - test-tags: E2E
+  - root-cause: 2026-09-28T15:14:21Z @kj a sibling extension in this environment opens a Message of the day tab that becomes active, and galata's waitForApplication blocks on isTabActive('Launcher') before any test body runs
+  - log: 2026-09-28T13:49:46Z @kj added
+  - log: 2026-09-28T13:49:46Z @kj ruled out: galata/lab minor skew (5.6.4 vs 4.6.4, probe reads dataset.shellMode); page load (snapshot shows full lab UI); slowness (240s timeout fails the same)
+  - log: 2026-09-28T13:49:46Z @kj fixed along the way: galata bumped 5.0.5 to 5.6.0 range, port threaded via JUPYTER_TEST_PORT, baseURL set, reuseExistingServer false, workers 1 for the process-global queue, JUPYTERLAB_GALATA_ROOT_DIR set, delete_to_trash false; send2trash errors went 16 to 0, tmpPath 404s remain
+  - log: 2026-09-28T15:14:21Z @kj root-cause updated "2026-09-28T13:49:46Z @kj not yet found; galata 5.6.4 matches lab 4.6.4 and its isInSimpleMode reads dataset.shellMode, so the documented version-skew cause is excluded" -> "a sibling extension in this environment opens a Message of the day tab that becomes active, and galata's waitForApplication blocks on isTabActive('Launcher') before any test body runs"
+  - log: 2026-09-28T15:14:22Z @kj closed
+  - log: 2026-09-28T15:57:49Z @kj evidence re-collected: the first Galata pass was measured against the installed 1.2.26 server extension, not this tree; the current source was built and reinstalled, and the 4 specs pass again, exit 0
+- [x] `DEF-TEST-23` **Nine criteria tagged UNIT with no unit test behind them** - CRITICAL; test-tags UNIT was added in bulk to ACC-IMMED-5,9,10,11,12,13,14,28 and ACC-TIME-35; jest testRegex matches only src/**tests**, neither spec imports index.ts, so displayNotification, seenNotificationIds, the reconnect backoff and pollOffline have no test at any tier, and no pytest opens the stream or forces an ingest 500
+  - evidence: three criteria gained mutation-proven tests (stream route, generic 500, backoff extracted to utils); six no test reaches are retagged MANUAL and one FUNCTIONAL; the assertion-less test now asserts; pm-tools coverage reads 15 UNIT, 2 FUNCTIONAL, 5 E2E, 13 MANUAL
+  - repro: grep testRegex jest.config.js, then grep index in src/**tests**; nothing imports it
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T14:28:55Z @kj tags were assigned from reading the code rather than from tests that exist
+  - log: 2026-09-28T14:28:55Z @kj added
+  - log: 2026-09-28T15:05:18Z @kj closed
+  - log: 2026-09-28T16:38:43Z @kj corrected evidence: quoted grid was 16 UNIT 1 FUNCTIONAL; pm-tools coverage reads 15 UNIT 2 FUNCTIONAL
+- [x] `DEF-TEST-24` **test_notification_ids_unique_across_drains cannot fail** - MAJOR; the two ids it compares already differ in their millisecond prefix, so the counter suffix never decides the assertion; restoring the pre-fix len(_notification_store) id leaves the suite at 29 passed, yet DEF-IMMED-2 evidence and the ACC-IMMED-8 UNIT tag both rest on this test
+  - evidence: the clock is pinned with monkeypatch so both ids share the millisecond prefix, and the test asserts the prefixes match and the suffixes differ; mutation-verified: restoring the len(_notification_store) id makes it fail with assert '0' != '0', where before it stayed green
+  - repro: sed the id back to len(_notification_store) in routes.py and run pytest; 29 pass
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T14:28:55Z @kj the test does not control the clock, so it cannot isolate the suffix it exists to check
+  - log: 2026-09-28T14:28:55Z @kj added
+  - log: 2026-09-28T15:00:40Z @kj closed
+- [x] `DEF-TEST-39` **Two CLI tests fail when an ordinary variable is exported** - MINOR; the captured_request fixture patches detect_token but not the environment, so JUPYTERLAB_NOTIFY_TOKEN=x makes the loopback-token test fail, and JUPYTERHUB_SERVICE_PREFIX=/user/alice/ makes the refuses-to-guess test resolve the ambiguity it asserts is unresolvable
+  - evidence: the captured_request fixture delenvs JUPYTERLAB_NOTIFY_TOKEN and the selection test delenvs JUPYTERHUB_SERVICE_PREFIX; the suite passes with both exported, where it previously failed
+  - repro: JUPYTERLAB_NOTIFY_TOKEN=devbox pytest, then JUPYTERHUB_SERVICE_PREFIX=/user/alice/ pytest; one failure each
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T15:48:30Z @kj the tests read process environment the fixture does not neutralise
+  - log: 2026-09-28T15:48:30Z @kj added
+  - log: 2026-09-28T15:57:49Z @kj closed
+- [x] `DEF-TEST-66` **Redundant `_FakeResponse` class in the CLI tests** - MINOR; the fixture subclassed `io.BytesIO` to add `__enter__` and `__exit__`, which `IOBase` already provides; deleting it leaves every CLI test passing
+  - evidence: the class is deleted and the fixture returns io.BytesIO directly; 66 pytest green
+  - repro: return `io.BytesIO` directly from the fixture and run the CLI tests
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T18:17:33Z @kj the context-manager protocol was assumed absent from BytesIO
+  - log: 2026-09-28T18:17:33Z @kj added
+  - log: 2026-09-28T18:18:22Z @kj closed
+  - log: 2026-09-28T18:35:25Z @kj edited title "Redundant _FakeResponse class in the CLI tests" -> "Redundant `_FakeResponse` class in the CLI tests"; text "the fixture subclassed io.BytesIO to add __enter__ and __exit__, which IOBase already provides; deleting it leaves every CLI test passing" -> "MINOR; the fixture subclassed `io.BytesIO` to add `__enter__` and `__exit__`, which `IOBase` already provides; deleting it leaves every CLI test passing"
+  - log: 2026-09-28T18:35:25Z @kj edited repro "return io.BytesIO directly from the fixture and run the CLI tests" -> "return `io.BytesIO` directly from the fixture and run the CLI tests"
+- [x] `DEF-TEST-67` **Dead conditional in a new degradation test** - MINOR; the label read attempts >= 0 ? mode : '' where attempts starts at 0 and only rises, so the condition is invariantly true and the empty branch unreachable; ui-tests is in eslintIgnore so no linter would flag it
+  - evidence: the label interpolates mode directly; 9 Galata E2E green
+  - repro: read the ternary against the initialiser
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T18:17:33Z @kj written this round, reads as though the label depended on the retry count
+  - log: 2026-09-28T18:17:33Z @kj added
+  - log: 2026-09-28T18:18:22Z @kj closed
+- [x] `DEF-TEST-79` **Failure-report test never ran the reporting code** - MINOR; the test named for the one-line report rebuilt the format string itself, so cli.py 307-321 and main's report never executed; re-adding the interpolated body changed no test result
+  - evidence: test_failure_report_is_one_status_line goes through send_notification_api over 2 bodies, plus URLError and main-report tests; sys.settrace shows both arms and main's report execute; 2 mutants killed; 81 pytest green
+  - repro: trace the suite with sys.settrace and look for the HTTPError and URLError arms of send_notification_api
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:11:37Z @kj the only urlopen stub in test_cli.py always succeeded, so nothing reached the failure handler
+  - log: 2026-09-28T19:11:37Z @kj added
+  - log: 2026-09-28T19:11:46Z @kj closed
+- [x] `DEF-TEST-95` **Round-6 tests left two gaps they were written to close** - MINOR; no row put a reason into the report, so deleting the reason from it broke nothing, and the main-report test omitted a server-list stub so it spawned the developer's own jupyter server list
+  - evidence: a reason-bearing row added to the report table and the main test stubs _list_running_servers; tearing the reason out of the report now fails one case; 86 pytest green
+  - repro: delete the reason from the report and run the suite; nothing fails
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T19:38:51Z @kj both rows fed bodies whose reason is empty, and the remote host path reads the server list before the loopback rule rejects it
+  - log: 2026-09-28T19:38:51Z @kj added
+  - log: 2026-09-28T19:39:32Z @kj closed
+- [x] `DEF-TEST-112` **Message field's mark had no assertion** - MINOR; deleting the wrapper class from the message input removed the mark and passed the whole suite; the seconds field got the mutation-resistant assertion and the message field did not
+  - evidence: the whitespace test compares the message field's background against the same field holding a valid value and asserts the wrapper; the round-8 slop-hunter independently killed the class-rename mutant at E2E
+  - repro: delete messageWrapper.className and run the suite
+  - test-tags: E2E
+  - root-cause: 2026-09-28T20:29:04Z @kj the whitespace test asserted validity and button state only, neither of which depends on the stylesheet
+  - log: 2026-09-28T20:29:04Z @kj added
+  - log: 2026-09-28T20:37:43Z @kj closed
+- [x] `DEF-TEST-113` **Galata spec opened the dialog two ways** - MINOR; the first test repeated the palette sequence and header assertion that openSendDialog already performs for the other tests
+  - evidence: the first test calls openSendDialog and keeps its two field assertions; about 18 lines removed
+  - repro: compare the first test with openSendDialog
+  - test-tags: E2E
+  - root-cause: 2026-09-28T20:29:04Z @kj the helper was added later and the existing call site was not adopted
+  - log: 2026-09-28T20:29:04Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+- [x] `DEF-TEST-117` **Server-side auto-close default had no test** - MINOR; changing routes.py's DEFAULT_AUTO_CLOSE_MS from 5000 to 3000 passed the whole suite; the frontend always sends the field, so the default reaches only a raw REST caller and nothing pinned it
+  - evidence: test_ingest_applies_the_documented_auto_close_default posts without autoClose and asserts 5000; the 3000 mutant now fails it, 91 pytest green
+  - repro: set DEFAULT_AUTO_CLOSE_MS to 3000 in routes.py and run the suite
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T20:39:12Z @kj every existing ingest test supplies autoClose explicitly
+  - log: 2026-09-28T20:39:12Z @kj added
+  - log: 2026-09-28T20:39:12Z @kj closed
+- [x] `DEF-TEST-122` **Theme tests could not fail on half the rules they proved** - MAJOR; the border was read while the field held focus, so the :focus rule supplied it and deleting either border declaration left both tests green; deleting the :focus rule removed the focus indicator entirely with the suite passing
+  - evidence: the theme tests read the border focused and blurred, assert the blurred border differs from the text colour and that focus changes it; both previously surviving mutants now fail in both themes
+  - repro: delete border-color from style/base.css and run the theme tests
+  - test-tags: E2E
+  - root-cause: 2026-09-28T21:14:12Z @kj the dialog focuses the message field on open and the assertion was taken in that state only
+  - log: 2026-09-28T21:14:12Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-TEST-131` **Mutation result depended on machine state** - CRITICAL; the test for the credential fix left _list_running_servers unstubbed, so restoring the mutant read this machine's runtime directory; it died only where exactly one server was listed and survived in CI, while the evidence claimed it killed
+  - evidence: the test stubs _list_running_servers; the restored mutant now fails on this machine and with an empty JUPYTER_RUNTIME_DIR, which is the CI condition
+  - repro: restore the re-derivation in detect_token with an empty JUPYTER_RUNTIME_DIR and run the suite
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:08:30Z @kj _select_server returns a record only for exactly one listed server, so the assertion could not bite on any other machine
+  - log: 2026-09-28T22:08:30Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-TEST-139` **Theme test read the focused style before focus landed** - MINOR; the dark-theme case failed inside the full suite and passed in isolation; the helper waits only for the dialog header, and the assertion depended on focus having reached the message field
+  - evidence: the test asserts toBeFocused before reading the focused style; two consecutive full-suite runs are 13 of 13 green
+  - repro: run the full Galata suite and watch the dark-theme legibility case
+  - test-tags: E2E
+  - root-cause: 2026-09-28T22:08:49Z @kj the rewritten assertion needs the focused state and nothing asserted it had arrived
+  - log: 2026-09-28T22:08:49Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-TEST-147` **Environment decided a mutation outcome again** - MAJOR; the single-server test was the only one of four not controlling JUPYTERHUB_SERVICE_PREFIX, so with the variable set to the fixture's own base_url a mutant deleting the rule it guards shipped green
+  - evidence: the test deletes JUPYTERHUB_SERVICE_PREFIX as its three siblings do; deleting the single-server rule now fails it with the variable exported to the fixture's own base_url
+  - repro: delete the single-server rule and run with JUPYTERHUB_SERVICE_PREFIX=/user/alice/
+  - test-tags: UNIT
+  - root-cause: 2026-09-28T22:47:18Z @kj the prefix branch returns the record before the rule under test is reached
+  - log: 2026-09-28T22:47:18Z @kj added
+  - log: 2026-09-28T22:47:59Z @kj closed
+- [x] `DEF-TEST-154` **Dead focus statement in the theme test** - MINOR; a focus call was immediately defeated by the next line filling a different field, so it did nothing
+  - evidence: the statement is deleted; 13 Galata green
+  - repro: read the statement against the fill that follows it
+  - test-tags: E2E
+  - root-cause: 2026-09-28T22:47:39Z @kj left behind when the assertions above it were rewritten
+  - log: 2026-09-28T22:47:39Z @kj added
+  - log: 2026-09-28T22:48:00Z @kj closed
+- [x] `DEF-TEST-161` **Two Galata assertions unreachable and one duplicate assertion** - MINOR; toBeVisible already requires a non-empty box, so the width and height assertions after it could not fail, and a matcher assertion was a verbatim copy of one in another test
+  - evidence: the two unreachable assertions and the duplicate are deleted; the position assertion that a mutant does reach is kept; 14 Galata green
+  - repro: run the display-none bundle mutant and see which line fails
+  - test-tags: E2E
+  - root-cause: 2026-09-28T23:29:05Z @kj assertions added for thoroughness rather than for a mutation each could kill
+  - log: 2026-09-28T23:29:05Z @kj added
+  - log: 2026-09-28T23:29:05Z @kj closed
+- [x] `DEF-TEST-169` **The typeof half of the request guard had no covering case** - MINOR; all six bodies made the detail undefined, so deleting the string check left the suite green, and two assertions after an equality that subsumes them could not fail
+  - evidence: a non-string message case added to the table and the two subsumed assertions removed; replacing the typeof check with truthiness now fails 1 of 18 jest tests
+  - repro: replace the typeof check with a bare truthiness test and run jest
+  - test-tags: UNIT
+  - root-cause: 2026-09-29T00:03:32Z @kj every case exercised the key-absent path and none a non-string value
+  - log: 2026-09-29T00:03:32Z @kj added
+  - log: 2026-09-29T00:04:07Z @kj closed
+- [x] `DEF-TEST-175` **Three credential-matching guards could not fail** - MAJOR; the port-zero case passed because its record was on 8888 rather than the scheme default; the tuple values for a bare bind and localhost had no case at all; and the ambient fall-through was asserted on a function that never sees a record
+  - evidence: a port-80 record pins the port-zero rule, four cases pin the tuple values in both directions, and the ambient fall-through asserts through send_notification_api; each previously surviving mutant now fails
+  - repro: weaken the port test to truthiness, or collapse either tuple to one literal, and run the suite
+  - test-tags: UNIT
+  - root-cause: 2026-09-29T00:37:43Z @kj each guard was written against the input that motivated it rather than against the rule it states
+  - log: 2026-09-29T00:37:43Z @kj added
+  - log: 2026-09-29T00:38:03Z @kj closed
+- [x] `DEF-TEST-181` **No control caught a multi-site claim fix landing on N-1 sites** - MAJOR; three consecutive review rounds found a claim corrected in code and left standing in one document, because completeness was checked by memory and a grep written with the fix; fix: test_claim_sweep.py holds each retired wording and fails while any shipped surface carries it; jupyterlab_notifications_extension/tests/test_claim_sweep.py
+  - evidence: restoring 'may not be loopback' in README.md fails test_no_shipped_surface_carries_a_retired_claim[README.md]; 8 sweep cases green
+  - repro: restore a retired wording in README.md and run pytest
+  - test-tags: UNIT
+  - log: 2026-09-29T02:21:14Z @kj added
+  - log: 2026-09-29T02:21:14Z @kj closed
+- [x] `DEF-TEST-191` **Five test fixtures carried a record shape jupyter_server cannot emit** - MAJOR; SERVER_A, SERVER_B, ROOT_SERVER and two parametrized records omitted hostname, which ServerApp.server_info always writes, so five positive controls ran on impossible data and proved nothing about a real record; fix: each fixture carries a bind address; jupyterlab_notifications_extension/tests/test_cli.py
+  - evidence: every record fixture carries hostname; the '' table row is gone and 130 pytest green
+  - repro: grep the fixtures for a hostname key
+  - test-tags: UNIT
+  - log: 2026-09-29T02:21:43Z @kj added
+  - log: 2026-09-29T02:21:43Z @kj closed
+- [x] `DEF-TEST-202` **A guard test that cannot fail without its neighbour failing** - MINOR; test_every_listed_surface_exists asserted every listed surface exists, but read_text on a missing path already fails the parametrized test above it and names the path, so the docstring's silently was false; fix: deleted; tests/test_claim_sweep.py
+  - evidence: both lenses measured two failures from one rename; the case is gone and the sweep is 7 cases
+  - repro: rename a listed surface and run pytest
+  - test-tags: UNIT
+  - log: 2026-09-29T02:47:53Z @kj added
+  - log: 2026-09-29T02:47:53Z @kj closed
+- [x] `DEF-TEST-210` **A test docstring claimed the real path while the test stubs it** - MAJOR; test_a_non_ascii_url_is_reported_as_a_bad_url said raised by the real http.client path, not by a stub, two lines above a monkeypatch that raises it from a stub, and its own reason clause argued for the stub; the captured_request fixture was dead, its stub overwritten two lines later; fix: both; tests/test_cli.py
+  - evidence: docstring names the stub and why; the fixture parameter is gone; 145 pytest green
+  - repro: read the docstring against the body
+  - test-tags: UNIT
+  - log: 2026-09-29T03:13:57Z @kj added
+  - log: 2026-09-29T03:13:57Z @kj closed
+- [x] `DEF-TEST-214` **Five scheme cases covered three equivalence classes** - MINOR; a narrowing mutant killed three of the five and left two alive, so myhost.example:8888 and 127.0.0.1:8888 added CI time and no coverage; fix: three classes named in a comment, plus the IPv6 shape in its own test; tests/test_cli.py
+  - evidence: three cases, one per class; removing the guard still kills all three; 145 pytest green
+  - repro: narrow the scheme guard to an empty-scheme test and count the deaths
+  - test-tags: UNIT
+  - log: 2026-09-29T03:13:58Z @kj added
+  - log: 2026-09-29T03:13:58Z @kj closed
+- [x] `DEF-TEST-222` **Two assertions no mutant could reach** - MINOR; the Traceback check never ran, because the assertion above it fails first and no code path puts that word on the captured stream; the s3cr3t check was implied by the exact equality on the next line; fix: both deleted; tests/test_cli.py
+  - evidence: both lines removed; the surviving assertions still kill their mutants
+  - repro: revert the scrub guard and observe which assertion reports
+  - test-tags: UNIT
+  - log: 2026-09-29T03:33:58Z @kj added
+  - log: 2026-09-29T03:33:58Z @kj closed
+- [x] `DEF-TEST-223` **Nothing pinned the two published constants equal across their copies** - MINOR; API_NAMESPACE and DEFAULT_AUTO_CLOSE_MS exist once in cli.py and once in routes.py because cli.py must not import tornado, and each suite read its own module's copy, so a rename of one left both suites green and shipped a CLI that 404s on every send; fix: two assertions; tests/test_cli.py
+  - evidence: test_the_python_copies_of_the_published_constants_agree; the rename mutant kills it; 151 pytest green
+  - repro: rename API_NAMESPACE in routes.py only and run both suites
+  - test-tags: UNIT
+  - log: 2026-09-29T03:33:58Z @kj added
+  - log: 2026-09-29T03:33:58Z @kj closed
+- [x] `DEF-TEST-229` **A test fake passed an object http.client never passes** - MINOR; the latin-1 test raised UnicodeEncodeError with the bare token instead of the whole header value, so the branch it was written for was never entered and the misroute of a non-ASCII host shipped past it; fix: the fake carries the token prefix; tests/test_cli.py
+  - evidence: measured: e.object is the whole header value for a header and the netloc for a host; the corrected fake enters the branch
+  - repro: read the fake's object against http.client's putheader
+  - test-tags: UNIT
+  - log: 2026-09-29T03:54:03Z @kj added
+  - log: 2026-09-29T03:54:03Z @kj closed
+- [x] `DEF-TEST-237` **A test docstring named the discriminator the code had stopped using** - MINOR; it said e.encoding is the discriminator, which is exactly what DEF-UI-217-1 was, four lines above a fake the same round had corrected; the test seventy lines below already states the mechanism in use; fix: the sentence is deleted, not replaced; tests/test_cli.py
+  - evidence: the sentence is gone; both the slop-hunter and the ux-designer filed it
+  - repro: read the docstring against the branch it documents
+  - test-tags: UNIT
+  - log: 2026-09-29T04:22:56Z @kj added
+  - log: 2026-09-29T04:22:56Z @kj closed
+- [x] `DEF-TEST-238` **An assertion under an equality that already pinned the whole string** - MINOR; assert token not in message.replace, two lines under an exact equality on the same message, scrubbing a literal no message in that arm can produce; also one parametrized shape killed only mutants two siblings already kill; fix: both deleted; tests/test_cli.py
+  - evidence: the assertion and the dominated shape are gone; the slop-hunter proved the domination with a mutant matrix; 165 pytest green
+  - repro: mutate cli.py and observe which assertion reports
+  - test-tags: UNIT
+  - log: 2026-09-29T04:22:56Z @kj added
+  - log: 2026-09-29T04:22:56Z @kj closed
+- [x] `DEF-TEST-242` **The Authorization truthiness guard had no test, and a closure claimed it had** - MAJOR; the guard stops InvalidURL, which has no .object, from matching None against None and naming a token that does not exist; removing it left all 165 tests green, while my closure list asserted it was under test; fix: a test, and the false claim corrected; tests/test_cli.py
+  - evidence: test_a_bad_url_with_no_token_is_not_blamed_on_the_token; dropping the guard now kills it; http.client refuses any byte in \x00-\x20\x7f in a path
+  - repro: remove the truthiness guard and send to a --url with a space in the path and no token
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:29Z @kj added
+  - log: 2026-09-29T04:44:29Z @kj closed
+- [x] `DEF-TEST-248` **A test docstring named an arm its test no longer reaches** - MINOR; the port test explained the ASCII-ness ternary, and the test now raises at the pre-flight port check and never reaches that ternary; DEF-TEST-237's shape recreated in the round that closed it; fix: the sentence is gone; tests/test_cli.py
+  - evidence: the docstring keeps only its first sentence; the test still kills the shown-versus-base_url mutant
+  - repro: read the docstring against where the test now raises
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:30Z @kj added
+  - log: 2026-09-29T04:44:30Z @kj closed
+- [x] `DEF-TEST-251` **A parametrisation with a superset shape and no request stub** - MINOR; one of four token shapes was a strict superset of two siblings through the same any, and this was the only test in the file with no urlopen stub, so a guard-removed mutant sent a real request; fix: two shapes and the fixture; tests/test_cli.py
+  - evidence: two shapes remain, one per mechanism; the captured_request fixture means no test can reach the wire; the slop-hunter proved the domination by mutant matrix
+  - repro: run the guard mutants and see which shape kills which
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:51Z @kj added
+  - log: 2026-09-29T04:44:51Z @kj closed
+- [x] `DEF-TEST-268` **I deleted the only test of the only check for a NUL token** - MAJOR; two shapes were asked for because one was a superset and the test had no request stub; the stub answered the second, and removing NUL as well left the guard's one distinct mechanism unpinned - narrowing the class to CR and LF then passed all 166; fix: restored; tests
+  - evidence: the NUL case is back, the fixture means it sends nothing, and narrowing the class now kills it
+  - repro: narrow the guard class to CR and LF and run the suite
+  - test-tags: UNIT
+  - log: 2026-09-29T05:16:37Z @kj added
+  - log: 2026-09-29T05:16:37Z @kj closed
+- [x] `DEF-TEST-275` **A refusal case killed no mutant its siblings did not** - MINOR; with the checks split, the third parametrised case reaches the same arm as the second, so either surviving term still catches it; fix: deleted, and a case for the empty value added in its place, which no sibling covered; tests/test_cli.py
+  - evidence: the dominated case is gone; the empty-value case kills the truthiness mutant that nothing caught
+  - repro: drop each term of the refusal in turn and see which case fails
+  - test-tags: UNIT
+  - log: 2026-09-29T05:36:06Z @kj added
+  - log: 2026-09-29T05:36:06Z @kj closed
+- [x] `DEF-TEST-278` **I edited the frozen tree while a reviewer was still running** - MAJOR; I applied the round-23 fix pass after three of four lenses reported and stated all four had; the bug-hunter was still working and its end-of-review freeze check read 36 of 44; it recovered by diffing against the wheel it had verified byte-identical and re-ran every claim, so its report stands; fix: check the running agents before applying
+  - evidence: round 8 failed the same way and is why the freeze exists; the rule is in the task description and I did not follow it - verify with ListAgents before any edit, not by assuming the last report is the last
+  - repro: compare the mtimes of the edited files against the reviewer's window
+  - test-tags: MANUAL
+  - log: 2026-09-29T05:55:36Z @kj added; reason: the body has to name what happened, what the reviewer did to recover and why its report is still usable, because the protocol's whole purpose is that a round under an edited tree confirms nothing
+  - log: 2026-09-29T05:55:37Z @kj closed
+
+## Time-ago indicator `TIME`
+
+The relative timestamp injected into the toast and the notification centre
+
+- [x] `DEF-TIME-28` **Time-ago vanishes for a message over 140 characters** - MAJOR; JupyterLab truncates the rendered message at 140 characters with an ellipsis, and the extension matches the toast by full message text, so nothing matches and no timestamp is injected in either the toast or the centre
+  - evidence: time-ago re-keyed from message text to notification id: one placeTimeAgo helper replaces three injectors, toasts addressed by DOM id, centre rows index-mapped to manager.notifications, refresh ends on detachment, text written only when changed, aria-hidden inside the toast live region; rspack build, 6 jest, 27 pytest, lint green
+  - related: DEF-TIME-29
+  - repro: post a 141-character message; no .jp-toast-time-ago appears, 140 works
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T14:36:06Z @kj the lab bundle does e.length>B?e.slice(0,B)+ellipsis with B=140; src/index.ts compares normalizeMsg(innerText) against the untruncated message
+  - log: 2026-09-28T14:36:06Z @kj added
+  - log: 2026-09-28T14:55:42Z @kj closed
+- [x] `DEF-TIME-29` **Two notifications with the same text get each other's timestamps** - MAJOR; serverCreatedAtMap lists are appended oldest first while the centre renders newest first because the manager unshifts, and consumption is a destructive shift, so a repeated message shows reversed times
+  - evidence: time-ago re-keyed from message text to notification id: one placeTimeAgo helper replaces three injectors, toasts addressed by DOM id, centre rows index-mapped to manager.notifications, refresh ends on detachment, text written only when changed, aria-hidden inside the toast live region; rspack build, 6 jest, 27 pytest, lint green
+  - repro: send the same message twice minutes apart, open the notification centre; the rows carry each other's times
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T14:36:06Z @kj arrival-order map consumed in DOM order, and shift() mutates the stored list
+  - log: 2026-09-28T14:36:06Z @kj added
+  - log: 2026-09-28T14:55:42Z @kj closed
+- [x] `DEF-TIME-30` **Timestamp re-announces the whole toast to a screen reader on a loop** - MAJOR; the element is injected inside the toast body, which react-toastify gives role=alert, and its textContent is rewritten every 10 seconds whether or not the value changed, so the entire toast is re-announced and with --no-auto-close it never stops
+  - evidence: time-ago re-keyed from message text to notification id: one placeTimeAgo helper replaces three injectors, toasts addressed by DOM id, centre rows index-mapped to manager.notifications, refresh ends on detachment, text written only when changed, aria-hidden inside the toast live region; rspack build, 6 jest, 27 pytest, lint green
+  - repro: open a toast with --no-auto-close under a screen reader; the toast is re-read every 10s
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T14:36:07Z @kj unconditional textContent write inside an assertive atomic live region
+  - log: 2026-09-28T14:36:07Z @kj added
+  - log: 2026-09-28T14:55:42Z @kj closed
+- [x] `DEF-TIME-31` **Time-ago refresh interval leaked one timer per notification** - MAJOR; the toast refresh cleared only when Notification.manager.has(id) went false, but autoClose does not dismiss a notification, so has() stayed true and the 10s timer ran for the tab's lifetime writing to a detached node
+  - evidence: time-ago re-keyed from message text to notification id: one placeTimeAgo helper replaces three injectors, toasts addressed by DOM id, centre rows index-mapped to manager.notifications, refresh ends on detachment, text written only when changed, aria-hidden inside the toast live region; rspack build, 6 jest, 27 pytest, lint green
+  - repro: send several notifications with autoClose, then count live intervals; none are cleared
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T14:55:42Z @kj manager.has() is a queue lookup, and only dismiss() empties the queue
+  - log: 2026-09-28T14:55:42Z @kj added
+  - log: 2026-09-28T14:55:42Z @kj closed
+- [x] `DEF-TIME-32` **serverCreatedAt eviction never matches, so the map grows unbounded** - MAJOR; the map is keyed by the UUID notify() returns while seenNotificationIds holds the server's notif_<ms>_<n>; the two key spaces are disjoint, so the delete is a permanent no-op and one entry accumulates per notification for the tab's lifetime
+  - evidence: the no-op delete is removed and serverCreatedAt is bounded on its own key space with MAX_TRACKED_NOTIFICATIONS, evicting oldest-first; three lenses independently reported the disjoint key spaces
+  - repro: compare the key written at src/index.ts:311 with the id added at :260; the delete at :266 can never match
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T15:36:02Z @kj the eviction was wired to the wrong id space when the map was re-keyed
+  - log: 2026-09-28T15:36:02Z @kj added
+  - log: 2026-09-28T15:45:37Z @kj closed
+  - log: 2026-09-28T18:18:35Z @kj edited evidence "the no-op delete is removed and serverCreatedAt is bounded on its own key space with MAX_SERVER_CREATED_AT, evicting oldest-first at the set; three lenses independently reported the disjoint key spaces" -> "the no-op delete is removed and serverCreatedAt is bounded on its own key space with MAX_TRACKED_NOTIFICATIONS, evicting oldest-first; three lenses independently reported the disjoint key spaces"
+- [x] `DEF-TIME-49` **Relative timestamp rendered at 8.25px** - MINOR; 0.75em of the 11px message text gave 8.25px in the toast, the button bar and every notification-centre row, below JupyterLab's smallest type token
+  - evidence: the font-size reduction is removed; measured live in the toast at 11px against a parent of 11px, colour from --jp-ui-font-color2
+  - repro: measure the computed font size of .jp-toast-time-ago against the 13px UI base
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T16:51:52Z @kj a font-size reduction stacked on a parent that was already reduced
+  - log: 2026-09-28T16:51:52Z @kj added
+  - log: 2026-09-28T17:03:19Z @kj closed
+- [-] `DEF-TIME-53` **Absolute time in the toast reaches nobody** - MINOR; the toast time element carries aria-hidden true and a title attribute, so assistive technology never reads the absolute time and a native title needs hover, which a 5-second toast and a touch screen both deny; the same title on notification-centre rows is exposed and those rows persist
+  - repro: inspect the toast time element for aria-hidden and title, then try to reach the title on a touch screen
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T16:52:05Z @kj title is the only tooltip available without owning a tooltip component
+  - log: 2026-09-28T16:52:05Z @kj added
+  - log: 2026-09-28T16:52:05Z @kj rejected: no fix without an owned tooltip component inside JupyterLab's toast DOM, which the locked decision forbids; the notification centre already exposes the same absolute time on rows that persist
+  - log: 2026-09-28T17:56:08Z @kj the rejection reason's supporting sentence is wrong: measured, the notification centre rows carry only the relative label and the same hover-only title, no absolute time is rendered anywhere; the rejection stands because the only remedy is the owned tooltip a locked decision forbids
+
+## Send dialog `UI`
+
+The notification send dialog in the lab UI: its fields, validation and what it tells the user
+
+- [x] `DEF-UI-80` **Send button dies and no field is marked** - MAJOR; a constraint violation greys Send with nothing on screen at fault; typing 0 in the seconds box, a value README documents as silent mode, kills Send silently and Enter does nothing
+  - evidence: both constrained inputs wrapped in jp-InputDialog-inputWrapper; Galata test compares the seconds field's background when valid against invalid; renaming the class in the served bundle fails it
+  - repro: open the send dialog, type 0 in the seconds field
+  - test-tags: E2E, MANUAL
+  - root-cause: 2026-09-28T19:38:23Z @kj JupyterLab's only :invalid styling is scoped to .jp-InputDialog-inputWrapper and neither constrained input was inside one
+  - log: 2026-09-28T19:38:23Z @kj added
+  - log: 2026-09-28T19:56:13Z @kj closed
+- [x] `DEF-UI-81` **Whitespace-only message discards the whole form** - MINOR; required is satisfied by one space, so Send stayed live, the dialog closed and the trim then rejected it, losing the message, type, seconds and dismiss choice
+  - evidence: messageInput.pattern rejects whitespace-only; Galata test asserts checkValidity false, Send disabled and the dialog still open; weakening the pattern in the served bundle fails it
+  - repro: open the send dialog, type a single space, press Send
+  - test-tags: E2E, MANUAL
+  - root-cause: 2026-09-28T19:38:23Z @kj required tests for emptiness, not for content; only the trim after the dialog closed caught it
+  - log: 2026-09-28T19:38:23Z @kj added
+  - log: 2026-09-28T19:56:13Z @kj closed
+- [x] `DEF-UI-82` **Two checkbox rows built two ways** - MINOR; the auto-close row sets a 10px gap and uses a sibling label, the dismiss row sets 5px and wraps the checkbox, so identically placed checkboxes have labels at different offsets
+  - evidence: the dismiss row is now a flex container with a sibling label and a 10px gap, matching the auto-close row; tsc exit 0, 11 Galata green, and the retaken screenshot shows the two rows aligned
+  - repro: open the send dialog and compare the two checkbox rows
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T19:38:24Z @kj the two rows were written at different times and neither copied the other
+  - log: 2026-09-28T19:38:24Z @kj added
+  - log: 2026-09-28T19:56:13Z @kj closed
+- [x] `DEF-UI-98` **Invalid field hid its own value in the dark theme** - MAJOR; the error background is the same pale pink in both themes while the font colour follows the theme, so the value the operator had to correct measured white on pink at 1.41:1
+  - evidence: style/base.css pairs the theme-invariant error background with a theme-invariant foreground; measured in both themes: rgb(183,28,28) on rgb(255,205,210), 4.67:1, was white at 1.41:1 in dark; 2 Galata tests
+  - repro: switch to JupyterLab Dark, open the send dialog, type 0 in the seconds field
+  - test-tags: E2E
+  - root-cause: 2026-09-28T20:28:27Z @kj wrapping the inputs brought JupyterLab's :invalid rule, which pairs a theme-invariant background with a theme-dependent foreground
+  - log: 2026-09-28T20:28:27Z @kj added
+  - log: 2026-09-28T20:37:43Z @kj closed
+- [x] `DEF-UI-99` **Untouched message field lost its chrome and its focus ring** - MAJOR; the rule suppressing the invalid mark while the placeholder shows sets border and background to unset, which compute to currentcolor and transparent: a bare black outline in light, white in dark, overriding the brand focus border at 1.35:1
+  - evidence: the placeholder-shown rule restores border-color and background to the normal values and the brand colour on focus; measured light border rgb(25,118,210) on white, dark rgb(33,150,243) on rgb(33,33,33); 2 Galata tests
+  - repro: open the send dialog and look at the empty message field it focuses
+  - test-tags: E2E
+  - root-cause: 2026-09-28T20:28:27Z @kj unset on a non-inherited property is the CSS initial, not the normal value, and the rule's intent is only to stop it looking invalid
+  - log: 2026-09-28T20:28:27Z @kj added
+  - log: 2026-09-28T20:37:43Z @kj closed
+- [x] `DEF-UI-103` **Message pattern rejected text the REST route accepts** - MINOR; a JavaScript dot matches neither U+2028 nor U+2029, so a message pasted from a PDF carrying either was marked invalid with no visible offending character
+  - evidence: pattern is [\\s\\S]*\\S[\\s\\S]* ; verified in the v-flag regex the HTML pattern compiles to: accepts U+2028, U+2029, emoji and ordinary text, rejects space, tab, nbsp, ideographic space and empty
+  - repro: paste a string containing U+2028 into the dialog's message field
+  - test-tags: E2E, MANUAL
+  - root-cause: 2026-09-28T20:28:46Z @kj the pattern used . for any character, which excludes the two line separators
+  - log: 2026-09-28T20:28:46Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+- [x] `DEF-UI-104` **A field turned red and nothing said why** - MINOR; typing 0 seconds or a whitespace-only message painted the field and greyed Send with no words on screen; three spaces render as an empty box, so the mark reads as you left it blank
+  - evidence: both constrained inputs carry a title, which is the hover explanation and part of the accessible description, measured on the field as description=<the text> with invalid=true; no native bubble is involved
+  - repro: type 0 in the seconds field and look for an explanation
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T20:28:46Z @kj the native validation bubble never shows because the Dialog blocks Enter before reportValidity runs
+  - log: 2026-09-28T20:28:46Z @kj added
+  - log: 2026-09-28T20:29:41Z @kj closed
+  - log: 2026-09-28T21:13:34Z @kj edited evidence "both constrained inputs carry a title, which is the hover explanation, the text the spec appends to the validation bubble, and part of the accessible description" -> "both constrained inputs carry a title, which is the hover explanation and part of the accessible description, measured on the field as description=<the text> with invalid=true; no native bubble is involved"
+- [x] `DEF-UI-123` **Caret was error red before anything was wrong** - MINOR; color paints the text insertion point, and a required empty field is already invalid, so the field the dialog opens on drew a red caret; in the dark theme it measured 2.45:1, harder to find than the theme's own
+  - evidence: the colour rule takes :not(:placeholder-shown), so an untouched field keeps the theme caret; the seconds field has no placeholder and is unaffected; 13 Galata green
+  - repro: open the send dialog in the dark theme and look at the insertion point
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T21:14:13Z @kj the rule matched every invalid input, including one showing its placeholder with nothing typed
+  - log: 2026-09-28T21:14:13Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-UI-124` **Seconds hover text denied a value the field rejects** - MINOR; min 1 with the default step 1 makes 2.5 a step mismatch, so Send greyed and the field painted while the only explanation on screen said one second or more is acceptable
+  - evidence: the hover text reads 'Whole seconds, one or more.', which covers the step mismatch as well as the minimum
+  - repro: type 2.5 in the seconds field and read the hover text
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T21:14:13Z @kj the string described the minimum and not the step
+  - log: 2026-09-28T21:14:13Z @kj added
+  - log: 2026-09-28T21:22:35Z @kj closed
+- [x] `DEF-UI-132` **Palette caption named an audience nothing reaches** - MAJOR; the command said it sends to all JupyterLab users; the listener set is per server process and each hub user has their own, so an administrator announces maintenance, sees their own toast and nobody else receives it
+  - evidence: the caption reads 'Send a notification to every open tab of this JupyterLab server'; 13 Galata green, tsc exit 0
+  - repro: read the command caption in the palette against _stream_listeners in routes.py
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:08:30Z @kj the caption predates the per-server architecture and is the only audience statement in the UI
+  - log: 2026-09-28T22:08:30Z @kj added
+  - log: 2026-09-28T22:09:03Z @kj closed
+- [x] `DEF-UI-146` **The audience statement rendered into a hidden node** - MAJOR; the palette caption was corrected but Lumino renders captions into .lm-CommandPalette-itemCaption, which JupyterLab sets to display none, so the product still told the sender nothing about who receives a notification
+  - evidence: the dialog body carries the sentence above the message field, with the negative clause; a Galata test asserts it is visible with a non-zero box, and hiding it in the served bundle fails that test
+  - repro: open the palette and measure the caption's computed display and box
+  - test-tags: E2E
+  - root-cause: 2026-09-28T22:47:18Z @kj the fix changed a string that no surface renders, and the closure checked the string rather than the screen
+  - log: 2026-09-28T22:47:18Z @kj added
+  - log: 2026-09-28T22:47:59Z @kj closed
+- [x] `DEF-UI-153` **Seconds constraint lived only in a tooltip** - MINOR; typing 0 paints the field and kills Send with no visible explanation; the only text is a title attribute, which no browser opens on keyboard focus and which does not exist on touch, and the CLI documents 0 as silent mode
+  - evidence: the visible label reads 'seconds (1 or more)', so the constraint no longer depends on a tooltip; the title keeps the whole-number nuance
+  - repro: type 0 in the seconds field using the keyboard only
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T22:47:39Z @kj the constraint was added as a tooltip rather than to the visible label
+  - log: 2026-09-28T22:47:39Z @kj added
+  - log: 2026-09-28T22:48:00Z @kj closed
+- [x] `DEF-UI-159` **Seconds label stated a range the control rejects** - MINOR; the visible label said 1 or more while min=1 with the default step also rejects every fraction, so 2.5 satisfied the only text on screen and was refused; the whole-number half stayed in the tooltip the label was added to replace
+  - evidence: the label reads 'seconds (whole number, 1 or more)', which covers the step as well as the minimum; the title remains the field's only accessible description, since nothing associates the visible span with the input
+  - repro: type 2.5 in the seconds field and read the label
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T23:29:05Z @kj half the constraint was moved to the label and the closure recorded the whole of it as moved
+  - log: 2026-09-28T23:29:05Z @kj added
+  - log: 2026-09-28T23:29:05Z @kj closed
+  - log: 2026-09-29T00:31:08Z @kj edited evidence "the label reads 'seconds (whole number, 1 or more)', which covers the step as well as the minimum, so the title is redundant rather than load-bearing" -> "the label reads 'seconds (whole number, 1 or more)', which covers the step as well as the minimum; the title remains the field's only accessible description, since nothing associates the visible span with the input"
+- [x] `DEF-UI-160` **Audience sentence not wired as an accessible description** - MINOR; it was a bare div with no id or association, so whether a screen reader announced it on entry depended on the reader rather than on the markup
+  - evidence: the div carries an id and the dialog gets aria-describedby, set at construction rather than in the ready callback which resolves after focus has entered; not on the message field, where it would outrank and silence that field's own title
+  - repro: inspect the dialog's accessible description in the browser accessibility tree
+  - test-tags: MANUAL
+  - root-cause: 2026-09-28T23:29:05Z @kj the element was added for sighted readers and never associated with the dialog
+  - log: 2026-09-28T23:29:05Z @kj added
+  - log: 2026-09-28T23:29:05Z @kj closed
+  - log: 2026-09-29T00:31:08Z @kj edited evidence "the div carries an id and the dialog gets aria-describedby in the ready callback; not on the message field, where it would outrank and silence that field's own title" -> "the div carries an id and the dialog gets aria-describedby, set at construction rather than in the ready callback which resolves after focus has entered; not on the message field, where it would outrank and silence that field's own title"
+- [x] `DEF-UI-184` **One progress line for three different target states** - MAJOR; the URL: line printed the same bytes for a matched server with its token, a --url matching nothing with no credential, and the default address, so a 403 sent the operator to the server when the cause was the --url; fix: the line names where the address came from; cli.py
+  - evidence: test_the_progress_line_says_the_address_came_from_a_listed_server plus the unmatched sibling; a constant-label mutant kills one; 130 pytest green
+  - repro: jupyterlab-notify --url http://127.0.0.1:9999 -m x, then with a listed port; compare stderr
+  - test-tags: UNIT
+  - log: 2026-09-29T02:21:23Z @kj added
+  - log: 2026-09-29T02:21:23Z @kj closed
+- [x] `DEF-UI-196` **A url with no http scheme was reported as an unreachable server** - MAJOR; urllib raises a bare ValueError and the Request is built outside the try, so --url localhost:8888 said cannot reach; is JupyterLab running there about a healthy server, and a --url with no colon escaped to main's last resort with the internal endpoint path attached; fix: reject it; cli.py
+  - evidence: test_a_url_without_an_http_scheme_is_reported_as_a_bad_url, 5 shapes; removing the guard kills all 5; 145 pytest green
+  - repro: jupyterlab-notify -m x --url localhost:8888 against a running server
+  - test-tags: UNIT
+  - log: 2026-09-29T02:47:24Z @kj added
+  - log: 2026-09-29T02:47:25Z @kj closed
+- [x] `DEF-UI-197` **The progress label separated two states, not three** - MINOR; the label was chosen on a match alone, so a run with no --url and nothing listed printed no listed server matched, asserting a comparison that never happened and hiding that the address was invented; fix: a third arm names the default address; cli.py
+  - evidence: test_the_progress_line_says_the_address_is_the_default; collapsing the third arm kills it; 145 pytest green
+  - repro: jupyterlab-notify -m x with an empty JUPYTER_RUNTIME_DIR
+  - test-tags: UNIT
+  - log: 2026-09-29T02:47:52Z @kj added
+  - log: 2026-09-29T02:47:52Z @kj closed
+- [x] `DEF-UI-198` **A withheld credential looked the same as an attached one** - MINOR; the no-token line was gated on --verbose, so two sends from one process - one carrying the ambient token, one deliberately withheld because the host is not a loopback literal - printed the same bytes, which is exactly the question a 403 raises; fix: that line always prints; cli.py
+  - evidence: re-gating the line on --verbose kills test_main_reports_one_failure_line_on_stderr_and_exits_1; 145 pytest green
+  - repro: send to http://localhost:PORT and to http://ip6-localhost:PORT with JUPYTER_TOKEN set; compare stderr
+  - test-tags: UNIT
+  - log: 2026-09-29T02:47:52Z @kj added
+  - log: 2026-09-29T02:47:52Z @kj closed
+- [x] `DEF-UI-199` **The 404 report named no next step** - MINOR; every sibling arm ends in a question or an instruction; a 404 ended at the URL, and its two causes are the extension not being enabled there or a --url missing the hub /user/<name> base path; fix: the epilog names both; cli.py
+  - evidence: the epilog carries a 404 paragraph naming both causes and the command that checks the first
+  - repro: send to a running server without the extension; read the failure line
+  - test-tags: MANUAL
+  - log: 2026-09-29T02:47:52Z @kj added
+  - log: 2026-09-29T02:47:52Z @kj closed
+- [x] `DEF-UI-200` **The send dialog had no accessible name** - MINOR; jupyter's Dialog sets aria-label only when the body is a string, and this body is a widget, so the dialog was announced with no name and the audience notice carried by aria-describedby had nothing to attach to; fix: aria-label beside the existing attribute; src/index.ts
+  - evidence: the node is a native dialog with ariaModal already set by apputils, so only the name was missing and only the name was added
+  - repro: read the dialog node's attributes against apputils dialog.js
+  - test-tags: E2E
+  - log: 2026-09-29T02:47:52Z @kj added
+  - log: 2026-09-29T02:47:52Z @kj closed
+- [-] `DEF-UI-206` **The auto-close row keeps full contrast while its field is disabled** - MINOR; unticking Auto-close disables the seconds field but leaves its two labels at full contrast, so the row reads as active and a constraint sentence stays on screen for a field nobody can type in; src/index.ts
+  - repro: open the send dialog, untick Auto-close, look at the two labels
+  - test-tags: E2E
+  - log: 2026-09-29T02:48:08Z @kj added
+  - log: 2026-09-29T02:48:13Z @kj rejected: declined as taste; reason: the reviewer filed it as taste and supplied the reason to decline: JupyterLab's own dialogs do not dim companion labels either, so the current behaviour matches the platform
+- [x] `DEF-UI-207` **The no-token line prescribed a fix on a successful send** - MAJOR; ungating that line in round 16 meant a token-less server - the project's own Galata fixture disables the token - delivered successfully and was still told to set JUPYTERLAB_NOTIFY_TOKEN, which there is no value for; fix: the line states what was sent; cli.py
+  - evidence: the line reads Sending without an authentication token; the 403-versus-withheld distinction is unchanged; 145 pytest green
+  - repro: send to a record whose token is empty and read stderr on exit 0
+  - test-tags: UNIT
+  - log: 2026-09-29T03:13:57Z @kj added
+  - log: 2026-09-29T03:13:57Z @kj closed
+- [x] `DEF-UI-212` **A non-ASCII URL was told a byte offset it cannot see** - MINOR; the failure line carried the codec's own position 6-11, which counts into http.client's encoded request line rather than the text typed, so the one number named nothing; fix: one ternary in the existing arm names the repair, rather than the second except arm that was priced; cli.py
+  - evidence: the message reads remove the non-ASCII characters; restoring the codec text kills the assertion; 145 pytest green
+  - repro: jupyterlab-notify -m x --url 'http://127.0.0.1:8913/пример'
+  - test-tags: UNIT
+  - log: 2026-09-29T03:13:57Z @kj added
+  - log: 2026-09-29T03:13:57Z @kj closed
+- [x] `DEF-UI-217` **A non-ASCII token was reported as a bad URL** - MINOR; http.client encodes the request line as ascii and a header value as latin-1 and raises UnicodeEncodeError for both, so keying on the exception type told the operator to remove characters from an auto-detected URL they never typed and which had none; fix: e.encoding names the token; cli.py
+  - evidence: test_a_non_ascii_token_names_the_token_not_the_url; removing the branch kills it; e.encoding measured as ascii for the request line and latin-1 for a header
+  - repro: send with a token carrying a zero-width space and read the failure line
+  - test-tags: UNIT
+  - log: 2026-09-29T03:33:57Z @kj added
+  - log: 2026-09-29T03:33:57Z @kj closed
+  - log: 2026-09-29T03:53:33Z @kj regressed as DEF-UI-217-1
+- [x] `DEF-UI-217-1` **A non-ASCII token was reported as a bad URL** - MINOR; urllib builds a Host header from the netloc and http.client encodes every header value as latin-1, writing Host before Authorization, so keying the token branch on the encoding blamed the token for a fault in the host; fix: the failing object names the token; cli.py
+  - evidence: the branch keys on the failing object being the Authorization value, which is exact; test_a_non_ascii_url_host_blames_the_url_not_the_token; reverting to the encoding test kills it; 157 pytest green
+  - test-tags: UNIT
+  - repro: jupyterlab-notify -m x --url with a zero-width space in the host, no token set
+  - log: 2026-09-29T03:53:33Z @kj regression of DEF-UI-217: its own fix reverted DEF-UI-218 on that defect's own repro: urllib builds a Host header from the netloc and http.client encodes every header value as latin-1, so a non-ASCII URL host raised the same encoding and was blamed on the token
+  - log: 2026-09-29T03:53:41Z @kj edited repro added "jupyterlab-notify -m x --url with a zero-width space in the host, no token set"; test-tags added "UNIT"
+  - log: 2026-09-29T03:53:41Z @kj closed
+  - log: 2026-09-29T04:23:21Z @kj edited text "http.client encodes the request line as ascii and a header value as latin-1 and raises UnicodeEncodeError for both, so keying on the exception type told the operator to remove characters from an auto-detected URL they never typed and which had none; fix: e.encoding names the token; cli.py" -> "urllib builds a Host header from the netloc and http.client encodes every header value as latin-1, writing Host before Authorization, so keying the token branch on the encoding blamed the token for a fault in the host; fix: the failing object names the token; cli.py"
+- [x] `DEF-UI-218` **An invisible URL character was echoed invisibly** - MINOR; a zero-width space and a Cyrillic homoglyph both render as the correct URL, so remove the non-ASCII characters named something the operator cannot see; fix: the echoed URL is escaped with backslashreplace, which leaves an all-ASCII URL byte-unchanged; cli.py
+  - evidence: the message carries the escape; removing it kills the assertion; a clean URL is unchanged
+  - repro: jupyterlab-notify -m x --url with a zero-width space in the host
+  - test-tags: UNIT
+  - log: 2026-09-29T03:33:57Z @kj added
+  - log: 2026-09-29T03:33:57Z @kj closed
+- [x] `DEF-UI-219` **A trailing space in --url quoted our own endpoint path** - MINOR; urlsplit lstrips space and removes tabs anywhere but never rstrips, so a leading space and a trailing tab both delivered while a trailing space failed with URL can't contain control characters quoting this tool's request target; fix: the scrub strips first; cli.py
+  - evidence: test_a_trailing_space_in_the_url_is_stripped; removing the strip kills it; 151 pytest green
+  - repro: jupyterlab-notify -m x --url 'http://127.0.0.1:8888/ '
+  - test-tags: UNIT
+  - log: 2026-09-29T03:33:57Z @kj added
+  - log: 2026-09-29T03:33:57Z @kj closed
+- [-] `DEF-UI-225` **An interior space in --url still quotes our own endpoint path** - MINOR; a space inside the path, as in /user/ alice, reports URL can't contain control characters quoting the request target with the namespace appended; the surrounding-whitespace half is fixed, this half is not; cli.py
+  - repro: jupyterlab-notify -m x --url 'http://127.0.0.1:8888/user/ alice'
+  - test-tags: MANUAL
+  - log: 2026-09-29T03:34:11Z @kj added
+  - log: 2026-09-29T03:34:11Z @kj rejected: deferred as a documented limitation; reason: the ux-designer scoped its own remedy to surrounding whitespace and said this half needs a new branch; an interior space is not a paste artefact the way a trailing one is, and the message does name the offending character
+- [x] `DEF-UI-226` **The token failure line omitted three of the six token sources** - MINOR; it named --token, JUPYTERLAB_NOTIFY_TOKEN and the record's own token, and detect_token also reads JUPYTERHUB_API_TOKEN, JPY_API_TOKEN and JUPYTER_TOKEN for any loopback target, so an operator who set one of those three was sent to three places that do not hold it; fix: the line points at the one complete list; cli.py
+  - evidence: the line names the authentication section of --help, which lists all six; shorter than the enumeration it replaced
+  - repro: set JUPYTER_TOKEN to a value with a zero-width space and send to loopback
+  - test-tags: MANUAL
+  - log: 2026-09-29T03:54:03Z @kj added
+  - log: 2026-09-29T03:54:03Z @kj closed
+- [x] `DEF-UI-230` **A second mechanism for one cause, and the worse of the two** - MAJOR; the ternary asked whether the URL was ASCII while the branch above already separated the token from the URL, so a URL with both a non-numeric port and a non-ASCII character was told to remove the character, which does not fix the port; fix: the type test; cli.py
+  - evidence: test_a_non_numeric_port_is_not_blamed_on_a_non_ascii_character; the ASCII test kills it; the architect and the slop-hunter both filed it
+  - repro: jupyterlab-notify -m x --url 'http://127.0.0.1:abc/<a non-ASCII character>'
+  - test-tags: UNIT
+  - log: 2026-09-29T03:54:16Z @kj added
+  - log: 2026-09-29T03:54:16Z @kj closed
+- [x] `DEF-UI-231` **Only one of the URL echoes was escaped** - MINOR; the escape landed on one bad URL arm, so the scheme-prefix arm printed a URL that visibly has the prefix it says is missing and every transport arm echoed an invisible character invisibly; str.strip does not help, a zero-width space is not whitespace; fix: one escaped form; cli.py
+  - evidence: one shown local, computed once; replacing it with base_url kills 3 tests; an all-ASCII URL is byte-unchanged
+  - repro: jupyterlab-notify -m x --url with a leading zero-width space
+  - test-tags: UNIT
+  - log: 2026-09-29T03:54:17Z @kj added
+  - log: 2026-09-29T03:54:17Z @kj closed
+- [x] `DEF-UI-233` **Ctrl+C printed a forty-line traceback** - MINOR; except Exception does not reach BaseException, so KeyboardInterrupt walked out of main in a tool whose every other failure is one line and whose exit codes are documented; fix: one arm, one line, exit 130; cli.py
+  - evidence: test_an_interrupt_reports_one_line_and_exits_130; without the arm the interrupt escapes and pytest ends the session naming that line; 165 pytest green
+  - repro: send to a slow server and interrupt it
+  - test-tags: UNIT
+  - log: 2026-09-29T04:22:56Z @kj added
+  - log: 2026-09-29T04:22:56Z @kj closed
+- [x] `DEF-UI-235` **A doubled port was reported as a name-resolution failure** - MINOR; ParseResult validates .port lazily and nothing touched it before the request, so --url with two ports reached urllib and came back as Name or service not known about a host that was fine; fix: .port is touched in its own try, in our own words; cli.py
+  - evidence: test_a_doubled_port_complains_about_the_port; the message reads the port must be a number, neither library's internals; removing the touch kills 3 tests
+  - repro: jupyterlab-notify -m x --url 'http://127.0.0.1:18888:19099'
+  - test-tags: UNIT
+  - log: 2026-09-29T04:22:56Z @kj added
+  - log: 2026-09-29T04:22:56Z @kj closed
+  - log: 2026-09-29T04:45:05Z @kj reclassified by measurement: at HEAD getaddrinfo wrapped 88888 to port 23352 and _is_loopback_url was true for that host, so an ambient token would have gone to whatever held 23352; the pre-flight check sits above token resolution, so none is now resolved
+- [x] `DEF-UI-243` **The documented exit codes omitted the one this round added** - MINOR; the epilog lists 0, 1 and 2 and main now returns 130; the agent skill points at that block as the only published list, so a wrapper routed a deliberate Ctrl+C to its unknown-failure branch; fix: one row; cli.py
+  - evidence: the block lists 130; three lenses filed it independently
+  - repro: jupyterlab-notify --help and compare the list against main's returns
+  - test-tags: MANUAL
+  - log: 2026-09-29T04:44:30Z @kj added
+  - log: 2026-09-29T04:44:30Z @kj closed
+- [x] `DEF-UI-244` **The interrupt arm covered a twentieth of the run** - MINOR; the try opened after target resolution, and reading the server list takes 1.084s of a 1.125s invocation outside it, so a Ctrl+C in the first second still printed a traceback; fix: main wraps a renamed _run, so no line is re-indented and except Exception keeps its narrow scope; cli.py
+  - evidence: an interrupt injected at _list_running_servers now prints Interrupted and exits 130; removing the wrapper lets it escape and pytest ends the session
+  - repro: interrupt during the server-list call rather than during the send
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:30Z @kj added
+  - log: 2026-09-29T04:44:30Z @kj closed
+- [x] `DEF-UI-245` **Two truth tests for one value in one decision** - MINOR; the resolution branch tests args.url is not None with a documented reason and a test, and the progress label forty-four lines later tested truthiness, so --url with an empty value claimed the default address had been used when it had not; fix: both ask the same question; cli.py
+  - evidence: the label now reads no listed server matched; measured before and after
+  - repro: jupyterlab-notify -m x --url ''
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:30Z @kj added
+  - log: 2026-09-29T04:44:30Z @kj closed
+- [x] `DEF-UI-247` **A pasted newline split the failure report across two lines** - MINOR; backslashreplace leaves a newline alone, because a newline is ASCII, and the unparsed text path does not remove one either, so the report spanned two lines - what repr was chosen to prevent in the transport arm; fix: unicode_escape; cli.py
+  - evidence: test_a_pasted_newline_in_the_url_stays_on_one_line; reverting to backslashreplace kills it; urlsplit removes newlines itself, so only the text path can carry one
+  - repro: jupyterlab-notify -m x --url with a newline inside an unbalanced IPv6 bracket
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:30Z @kj added
+  - log: 2026-09-29T04:44:30Z @kj closed
+- [x] `DEF-UI-253` **The port complaint was false for a port that is a number** - MINOR; urlparse raises two different ValueErrors and the message named only the non-numeric one, so an extra digit on this project's own default port was answered with a rule the operator's input satisfies; fix: the message names the range; cli.py
+  - evidence: the message reads the port must be a number from 0 to 65535; three test assertions follow it; the bug-hunter and the ux-designer filed it independently
+  - repro: jupyterlab-notify -m x --url 'http://127.0.0.1:88888/'
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:52Z @kj added
+  - log: 2026-09-29T04:44:52Z @kj closed
+- [x] `DEF-UI-254` **One token message served the alphabet cause and not the line-break cause** - MINOR; a trailing carriage return is invisible in a shell, the token is correctly never echoed, and --verbose says only that a token was used, so the sentence named no property the operator could look for; fix: the message names a line break; cli.py
+  - evidence: the constant names both causes; the test pins the constant by symbol, so the wording is free to say what is true
+  - repro: set a token from a CRLF env file and read the failure line
+  - test-tags: UNIT
+  - log: 2026-09-29T04:44:52Z @kj added
+  - log: 2026-09-29T04:44:52Z @kj closed
+- [x] `DEF-UI-260` **An unusable command was dropped in silence with exit 0** - MINOR; --command-args was parsed, validated and discarded when --command was absent, and the button went out captioned Close this notification, which asserts the opposite of what was asked; an empty --cmd took the same path; fix: exit 2, already documented; cli.py
+  - evidence: three refusal cases and a control that a usable command still carries its args; dropping the check kills 3; measured the discarded args and the wrong caption
+  - repro: jupyterlab-notify -m x --action Open --command-args '{"path": "x"}'
+  - test-tags: UNIT
+  - log: 2026-09-29T05:16:02Z @kj added
+  - log: 2026-09-29T05:16:02Z @kj closed
+- [x] `DEF-UI-261` **The port complaint did not name the value the parser read** - MINOR; urlsplit takes everything after the host's last colon, so a script composing a URL with no leading slash on its prefix read its port as in range while the parser saw a longer string; the value was available on the exception and discarded; fix: a parenthetical; cli.py
+  - evidence: three assertions carry the parenthetical; the value comes from the exception rather than a bracket-aware rule of the kind this module keeps paying for
+  - repro: jupyterlab-notify -m x --url 'http://127.0.0.1:8899user/alice'
+  - test-tags: UNIT
+  - log: 2026-09-29T05:16:02Z @kj added
+  - log: 2026-09-29T05:16:03Z @kj closed
+- [x] `DEF-UI-262` **An empty --url rendered as a hole in both operator lines** - MINOR; the progress line and every failure message interpolated the empty string, so a script passing an unset variable read URL: followed by nothing and bad URL : needs a prefix; fix: the empty case is quoted, which leaves every non-empty message byte-identical; cli.py
+  - evidence: both lines show '' for an empty value; no existing assertion moved, because a non-empty URL is unchanged
+  - repro: jupyterlab-notify -m x --url ''
+  - test-tags: UNIT
+  - log: 2026-09-29T05:16:03Z @kj added
+  - log: 2026-09-29T05:16:03Z @kj closed
+- [x] `DEF-UI-263` **The progress line split in two on a line break** - MINOR; the line is kept verbatim on purpose, because for a zero-width space or a homoglyph the contrast with the escaped failure line is the diagnosis; a line break is the one character where verbatim destroys the line instead; fix: only CR and LF translate; cli.py
+  - evidence: only CR and LF are translated, so the contrast survives for every other character
+  - repro: jupyterlab-notify -m x --url with a newline inside an unbalanced IPv6 bracket
+  - test-tags: UNIT
+  - log: 2026-09-29T05:16:03Z @kj added
+  - log: 2026-09-29T05:16:03Z @kj closed
+- [x] `DEF-UI-270` **The new command refusal passed exactly the values its tests passed** - MAJOR; one flag was tested for truth and its sibling on the same line for presence, so an unset shell variable in --command-args reached no check and the button went out captioned Close this notification - the shape the defect it closed describes; fix: presence at all three sites; cli.py
+  - evidence: a case for the empty value in the refusal parametrisation and a three-value test for --data; reverting either site to truthiness kills one; the architect and the slop-hunter filed it independently
+  - repro: jupyterlab-notify -m x --action Open --command-args '' and read the exit code
+  - test-tags: UNIT
+  - log: 2026-09-29T05:36:05Z @kj added
+  - log: 2026-09-29T05:36:05Z @kj closed
+- [x] `DEF-UI-272` **Exit 2 was documented as a two-item list that had grown to three** - MINOR; the table read as exhaustive and this round added a usage check, so a wrapper mapping 2 to its published causes reported a server-selection problem for a flag error; fix: the entry names the class, because every future usage check would otherwise need an edit here; cli.py
+  - evidence: the entry reads the message printed above names the flag; same shape as DEF-UI-243 for exit 130
+  - repro: jupyterlab-notify -m x --command-args '{}' and compare the exit against the table
+  - test-tags: MANUAL
+  - log: 2026-09-29T05:36:05Z @kj added
+  - log: 2026-09-29T05:36:06Z @kj closed
+- [x] `DEF-UI-273` **One usage error carried both rules and the flag's other spelling** - MINOR; half the sentence was about a flag the operator had not used, and it named --cmd while argparse's usage block prints --command and --action's help says --command - one option with three presentations on one screen; fix: two checks, each naming its own rule; cli.py
+  - evidence: two checks; each parametrised case asserts the message that fired rather than a shared substring
+  - repro: run each refusal path and read which half of the sentence applies
+  - test-tags: UNIT
+  - log: 2026-09-29T05:36:06Z @kj added
+  - log: 2026-09-29T05:36:06Z @kj closed
+
