@@ -1,6 +1,6 @@
 {
     "name": "jupyterlab_notifications_extension",
-    "version": "1.2.28",
+    "version": "1.2.29",
     "description": "JupyterLab extension that shows notifications sent by a JupyterHub administrator or by a script, as a toast and in the notification center.",
     "keywords": [
         "jupyter",
