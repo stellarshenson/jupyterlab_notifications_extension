@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.29] - 2026-10-07
+
+### Added
+
+- The shipped agent skill says how to hand the user a web application started on a port beside the lab: the server proxies that port at `<base path>proxy/<port>/`, the built-in `help:open` command opens it, and `newBrowserTab: true` gives it a real browser tab rather than a sandboxed frame inside the lab
+
+### Changed
+
+- The agent skill's `--command` rule states that a notification button can run any JupyterLab command id, with `--command-args` carrying its arguments, and names `help:open`, `docmanager:open` and `terminal:create-new`
+
+### Fixed
+
+- The test for a JSON payload that raises something other than a decode error: its 30000 levels of nesting are parsed by Python 3.14, so the test failed against correct code. The payloads are now 200000 levels and a 5001-digit integer, and the test asserts `json.loads` still raises before it runs the CLI
+
 ## [1.2.28] - 2026-09-29
 
 ### Added

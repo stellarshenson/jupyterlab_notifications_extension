@@ -1384,24 +1384,37 @@ def test_an_unparseable_data_value_is_reported(monkeypatch, capsys, value):
     assert "Error parsing --data JSON" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize(
-    "flag,label",
-    [("--data", "--data"), ("--command-args", "--command-args")],
-)
-def test_json_that_raises_something_other_than_a_decode_error(monkeypatch, capsys,
-                                                              flag, label):
-    """json.loads raises RecursionError for deep nesting, which is not a ValueError.
+# Each payload makes json.loads raise something that is not a JSONDecodeError.
+# The depth needed is the interpreter's, not this package's: 30000 levels raised
+# RecursionError on Python 3.13 and parse cleanly on 3.14, which stopped the test
+# reproducing its own condition, so the payload is checked before the CLI is run.
+NOT_A_DECODE_ERROR = [
+    ("[" * 200000 + "]" * 200000, "deep nesting raises RecursionError"),
+    ("1" + "0" * 5000, "an integer past the 4300-digit limit raises ValueError"),
+]
 
-    Past the 4300-digit integer limit it raises a plain ValueError, and neither is a
-    JSONDecodeError, so both walked out of main and printed a traceback where the
-    documented exit codes promise one line.
+
+@pytest.mark.parametrize("payload,condition", NOT_A_DECODE_ERROR)
+@pytest.mark.parametrize("flag", ["--data", "--command-args"])
+def test_json_that_raises_something_other_than_a_decode_error(monkeypatch, capsys,
+                                                              flag, payload,
+                                                              condition):
+    """Neither exception is a JSONDecodeError, so both walked out of main and
+    printed a traceback where the documented exit codes promise one line.
     """
+    with pytest.raises(Exception) as caught:
+        json.loads(payload)
+    assert not isinstance(caught.value, json.JSONDecodeError), (
+        f"this payload no longer reproduces the condition on this interpreter "
+        f"({condition}); the test needs one that still does"
+    )
+
     monkeypatch.delenv("JUPYTERLAB_NOTIFY_TOKEN", raising=False)
     argv = ["jupyterlab-notify", "-m", "x", "--url", "http://127.0.0.1:8888",
-            flag, "[" * 30000 + "]" * 30000]
+            flag, payload]
     if flag == "--command-args":
         argv += ["--action", "Open", "--cmd", "iframe:open"]
     monkeypatch.setattr("sys.argv", argv)
 
     assert cli.main() == 1
-    assert f"Error parsing {label} JSON" in capsys.readouterr().err
+    assert f"Error parsing {flag} JSON" in capsys.readouterr().err

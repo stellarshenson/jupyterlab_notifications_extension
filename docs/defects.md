@@ -1696,6 +1696,13 @@ The pytest, jest and Galata tiers and the configuration that runs them
   - test-tags: MANUAL
   - log: 2026-09-29T05:55:36Z @kj added; reason: the body has to name what happened, what the reviewer did to recover and why its report is still usable, because the protocol's whole purpose is that a round under an edited tree confirms nothing
   - log: 2026-09-29T05:55:37Z @kj closed
+- [x] `DEF-TEST-279` **Nesting depth test stopped reproducing its condition** - MEDIUM; the non-decode-error JSON test fed 30000 levels of nesting to provoke RecursionError; Python 3.14 parses that depth, so the test failed against working code and blocked make publish at its test step
+  - evidence: payload raised to 200000 levels plus a 5001-digit integer case, and the test now asserts json.loads really raises a non-JSONDecodeError before running the CLI; 4 cases pass, and all 4 fail when RecursionError and ValueError are removed from the cli.py except tuple
+  - repro: python3 -c "import json; json.loads('['*30000+']'*30000)" on 3.14 parses; on 3.13 it raises RecursionError
+  - test-tags: UNIT
+  - root-cause: 2026-10-06T22:33:57Z @kj the depth is the interpreter's limit, not this package's, and nothing in the test checked that the payload still raised
+  - log: 2026-10-06T22:33:57Z @kj added
+  - log: 2026-10-06T22:34:02Z @kj closed
 
 ## Time-ago indicator `TIME`
 
