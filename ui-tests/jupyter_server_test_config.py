@@ -33,7 +33,7 @@ c.ContentsManager.delete_to_trash = False
 _here = Path(__file__).resolve().parent
 _candidates = [
     _here.parent / "jupyterlab_notifications_extension" / "labextension",
-    Path(sys.prefix) / "share/jupyter/labextensions/jupyterlab_notifications_extension",
+    Path(sys.prefix) / "share/jupyter/labextensions/@stellarshenson/jupyterlab-notifications-extension",
 ]
 _source = next((cand for cand in _candidates if cand.exists()), None)
 if _source is None:
@@ -46,7 +46,9 @@ if _source is None:
     )
 _only = Path(tempfile.mkdtemp(prefix="galata-labext-"))
 atexit.register(shutil.rmtree, _only, True)
-os.symlink(_source, _only / "jupyterlab_notifications_extension")
+_link = _only / "@stellarshenson/jupyterlab-notifications-extension"
+_link.parent.mkdir()
+os.symlink(_source, _link)
 c.LabServerApp.labextensions_path = [str(_only)]
 
 # Uncomment to set server log level to debug level

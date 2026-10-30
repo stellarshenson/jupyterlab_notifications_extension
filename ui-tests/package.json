@@ -1,7 +1,7 @@
 {
-  "name": "jupyterlab_notifications_extension-ui-tests",
+  "name": "@stellarshenson/jupyterlab-notifications-extension-ui-tests",
   "version": "1.0.0",
-  "description": "JupyterLab jupyterlab_notifications_extension Integration Tests",
+  "description": "JupyterLab @stellarshenson/jupyterlab-notifications-extension Integration Tests",
   "private": true,
   "scripts": {
     "start": "jupyter lab --config jupyter_server_test_config.py",

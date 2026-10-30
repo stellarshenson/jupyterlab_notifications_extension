@@ -457,10 +457,10 @@ function connectNotificationStream(app: JupyterFrontEnd): void {
 }
 
 /**
- * Initialization data for the jupyterlab_notifications_extension extension.
+ * Initialization data for the @stellarshenson/jupyterlab-notifications-extension extension.
  */
 const plugin: JupyterFrontEndPlugin<void> = {
-  id: 'jupyterlab_notifications_extension:plugin',
+  id: '@stellarshenson/jupyterlab-notifications-extension:plugin',
   description:
     'JupyterLab extension that shows notifications sent by a JupyterHub administrator or by a script, as a toast and in the notification center.',
   autoStart: true,
@@ -469,7 +469,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // The exact message is required by the extension template and asserted by
     // the Galata suite; the level is not - Playwright captures debug too.
     console.debug(
-      'JupyterLab extension jupyterlab_notifications_extension is activated!'
+      'JupyterLab extension @stellarshenson/jupyterlab-notifications-extension is activated!'
     );
 
     // Register command to send notifications

@@ -8,7 +8,7 @@ has_ai_rules: false
 has_binder: false
 has_settings: false
 kind: frontend-and-server
-labextension_name: jupyterlab_notifications_extension
+labextension_name: '@stellarshenson/jupyterlab-notifications-extension'
 project_short_description: JupyterLab extension that shows notifications sent by a
     JupyterHub administrator or by a script, as a toast and in the notification center.
 python_name: jupyterlab_notifications_extension
