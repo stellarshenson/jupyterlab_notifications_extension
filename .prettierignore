@@ -13,3 +13,6 @@ jupyterlab_notifications_extension
 docs/defects*.md
 docs/acc-crit*.md
 docs/pm-hand-edits.md
+eslint.config.mjs
+.venv
+.agents

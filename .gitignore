@@ -141,3 +141,7 @@ graphify-out/
 
 # generated test report
 junit.xml
+
+# Run output
+logs/
+tmp/
