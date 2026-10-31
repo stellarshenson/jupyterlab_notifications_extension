@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.34] - 2026-10-31
+
+### Changed
+
+- Require Python 3.12
+
 ## [1.2.33] - 2026-10-31
 
 ### Changed
