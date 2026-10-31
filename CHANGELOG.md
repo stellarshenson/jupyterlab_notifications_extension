@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.31] - 2026-10-31
+
+### Changed
+
+- Exclude only the defects tracker from the link check
+- Exclude the two trackers from the link check
+- Upgrade to extension template v4.6.5 and Makefile 1.46
+
+### Fixed
+
+- Take the scoped @stellarshenson/jupyterlab-notifications-extension npm name
+
 ## [1.2.29] - 2026-10-07
 
 ### Added
