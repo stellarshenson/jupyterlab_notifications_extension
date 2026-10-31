@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.2.33] - 2026-10-31
+
+### Changed
+
+- Apply the template files and packages the upgrade left out
+- Raise the mock PyPI memory limit in the release check
+
 ## [1.2.31] - 2026-10-31
 
 ### Changed
