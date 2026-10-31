@@ -44,7 +44,7 @@ Interactive dialog with message input, type selection, auto-close timing, and an
 pip install jupyterlab_notifications_extension
 ```
 
-**Requirements**: JupyterLab >= 4.6.0, Python >= 3.10
+**Requirements**: JupyterLab >= 4.6.0, Python >= 3.12
 
 ## API Reference
 

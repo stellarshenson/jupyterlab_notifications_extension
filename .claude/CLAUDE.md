@@ -17,7 +17,7 @@ This file extends workspace-level configuration with project-specific rules.
 
 **Technology Stack**:
 
-- **Python**: >= 3.10 (required by JupyterLab 4.6), jupyter_server >= 2.21 (the tested version; JupyterLab itself needs only >= 2.19)
+- **Python**: >= 3.12, jupyter_server >= 2.21 (the tested version; JupyterLab itself needs only >= 2.19)
 - **TypeScript**: ~5.8.0
 - **JupyterLab**: >= 4.6.0
 - **Build**: Hatchling (Python), `@jupyter/builder` with rspack (frontend); webpack is absent
