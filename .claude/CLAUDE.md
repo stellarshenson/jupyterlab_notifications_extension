@@ -32,7 +32,7 @@ This file extends workspace-level configuration with project-specific rules.
 **Naming Conventions**:
 
 - Python package: `jupyterlab_notifications_extension` (snake_case)
-- NPM package: `jupyterlab_notifications_extension` (matches Python)
+- NPM package: `@stellarshenson/jupyterlab-notifications-extension` (the Python name with dashes, scoped)
 - Module structure follows JupyterLab extension conventions
 
 **Testing Requirements**:
@@ -43,6 +43,6 @@ This file extends workspace-level configuration with project-specific rules.
 
 **Build Outputs**:
 
-- Frontend labextension: `jupyterlab_notifications_extension/labextension/`
+- Frontend labextension: `./jupyterlab_notifications_extension/labextension/`
 - Compiled TypeScript: `lib/`
 - Distribution packages: wheel and sdist via hatchling

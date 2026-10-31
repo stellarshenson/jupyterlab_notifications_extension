@@ -31,6 +31,7 @@ from jupyter_server.utils import JupyterServerAuthWarning
 # Initialize a server which only loads this extension and which does not allow
 # unauthenticated access.
 app = ServerApp(
+    allow_unauthenticated_access=False,
     jpserver_extensions={"jupyterlab_notifications_extension": True},
     # Fail loudly if the extension cannot be loaded at all, instead of silently
     # reporting that there is nothing to complain about.
@@ -39,13 +40,14 @@ app = ServerApp(
 
 with warnings.catch_warnings(record=True) as records:
     warnings.simplefilter("always")
+    # template-sync: keep
     # Load-bearing, and not a duplicate of JUPYTER_NO_CONFIG above: this sets
     # the trait, that one only stops config files. allow_unauthenticated_access
     # defaults True, and jupyter_server emits the warning this gate reads only
     # when it is False (serverapp.py), so without this line no warning is ever
     # recorded and the gate passes an undecorated endpoint. On the command line
-    # rather than as a constructor kwarg, because CLI config is applied last
-    # and so also outranks JUPYTER_SERVER_ALLOW_UNAUTHENTICATED_ACCESS.
+    # as well as in the constructor, because CLI config is applied last and so
+    # also outranks JUPYTER_SERVER_ALLOW_UNAUTHENTICATED_ACCESS.
     app.initialize(
         argv=["--ServerApp.allow_unauthenticated_access=False"],
         find_extensions=False,

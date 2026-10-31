@@ -172,6 +172,6 @@ jobs:
           python_version: '3.13'
       - uses: jupyterlab/maintainer-tools/.github/actions/check-links@v1
         with:
-          # The defects tracker quotes sample URLs such as http://127.0.0.1:9999 in repro lines, which the checker reads as links of the file.
+          # template-sync: keep - the defects tracker quotes sample URLs such as http://127.0.0.1:9999 in repro lines, which the checker reads as links of the file.
           ignore_glob: "docs/defects.md"
-          ignore_links: 'https://www.npmjs.com/package/.* https://pypi.org/project/.* https://pepy.tech/.* https://static.pepy.tech/.*'
+          ignore_links: "https://www.youtube.com/.* https://www.npmjs.com/package/.* https://pypi.org/project/.* https://pepy.tech/.* https://static.pepy.tech/.*"

@@ -39,8 +39,9 @@ dev = [
 test = [
     "pytest>=9.2,<10",
     "pytest-asyncio>=1.4,<2",
-    "pytest-cov",
+    "pytest-cov>=7.1,<8",
     "pytest-jupyter[server]>=0.11,<1",
+    "coverage>=7.17,<8",
 ]
 
 [tool.hatch.version]
@@ -51,7 +52,7 @@ fields = ["description", "authors", "urls", "keywords"]
 
 [tool.hatch.build.targets.sdist]
 artifacts = ["jupyterlab_notifications_extension/labextension"]
-exclude = [".github"]
+exclude = [".github", "binder"]
 
 [tool.hatch.build.targets.wheel.shared-data]
 "jupyterlab_notifications_extension/labextension" = "share/jupyter/labextensions/@stellarshenson/jupyterlab-notifications-extension"
