@@ -58,3 +58,8 @@
   > input[required].jp-mod-styled:invalid:placeholder-shown:focus {
   border-color: var(--jp-brand-color1);
 }
+
+.jp-toast-message pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

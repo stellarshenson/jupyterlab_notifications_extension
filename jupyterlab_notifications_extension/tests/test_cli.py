@@ -154,6 +154,35 @@ def test_immediate_absent_by_default(captured_request):
     assert "immediate" not in payload
 
 
+def test_transient_flag_sets_payload_field(captured_request, monkeypatch):
+    """--transient maps to the transient field the server stores."""
+    monkeypatch.setattr(cli, "_list_running_servers", lambda: [])
+    monkeypatch.setattr(
+        "sys.argv",
+        ["jupyterlab-notify", "--url", "http://127.0.0.1:8888",
+         "-m", "x", "--transient"],
+    )
+
+    assert cli.main() == 0
+
+    payload = json.loads(captured_request["request"].data.decode())
+    assert payload["transient"] is True
+
+
+def test_transient_absent_by_default(captured_request, monkeypatch):
+    """Without --transient the key is absent, so the server defaults it false."""
+    monkeypatch.setattr(cli, "_list_running_servers", lambda: [])
+    monkeypatch.setattr(
+        "sys.argv",
+        ["jupyterlab-notify", "--url", "http://127.0.0.1:8888", "-m", "x"],
+    )
+
+    assert cli.main() == 0
+
+    payload = json.loads(captured_request["request"].data.decode())
+    assert "transient" not in payload
+
+
 # --- the failure report carries a reason, never a markup page ----------------
 
 class _FakeHTTPError(urllib.error.HTTPError):

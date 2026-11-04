@@ -65,6 +65,7 @@ class NotificationIngestHandler(APIHandler):
         "type": "info",  // optional: default, info, success, warning, error, in-progress
         "autoClose": 5000,  // optional: milliseconds or false for manual dismiss
         "immediate": true,  // optional: push instantly to connected clients via WebSocket
+        "transient": true,  // optional: dismiss when the toast closes
         "data": {},  // optional: arbitrary JSON; every number in it must be finite
         "actions": [  // optional
             {
@@ -115,6 +116,14 @@ class NotificationIngestHandler(APIHandler):
                 ))
                 return
 
+            transient = payload.get('transient', False)
+            if not isinstance(transient, bool):
+                self.set_status(400)
+                self.finish(json.dumps(
+                    {"error": "'transient' must be true or false"}
+                ))
+                return
+
             # Serialised here to fail the sender rather than the reader: the
             # store is drained before it is serialised, so one non-finite number
             # reaching the frontend makes JSON.parse reject the whole batch and
@@ -137,6 +146,7 @@ class NotificationIngestHandler(APIHandler):
                 "autoClose": payload.get('autoClose', DEFAULT_AUTO_CLOSE_MS),
                 "createdAt": int(time.time() * 1000),
                 "actions": actions,
+                "transient": transient,
                 "data": payload.get('data')
             }
 

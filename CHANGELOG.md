@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.2] - 2026-11-04
+
+### Added
+
+- `message` renders as GitHub-flavoured Markdown and a small sanitised HTML subset: paragraphs, bold, italic, strikethrough, inline and fenced code, block quotes, ordered and unordered lists, links, and `span` with `color` and `font-size`; every other tag and attribute is removed, and links are limited to http, https and mailto with `target="_blank"` and `rel="noopener noreferrer"`
+- `transient` field on the ingest API and `--transient` on `jupyterlab-notify`: the notification is dismissed when its toast closes, so the notification centre does not retain it
+- README sections for message formatting and for the transient field
+
+### Changed
+
+- Notification text is parsed and sanitised only for notifications this extension creates; JupyterLab's own toasts keep plain text
+- The visible preview is clipped to 140 code points, and the parsed source is bounded at 4096 characters, cut at the last newline when one sits near the bound
+- README drops the local development, testing and packaging sections
+
+### Fixed
+
+- Transient notifications were retained when JupyterLab suppressed the toast (`autoClose` of zero or less) and when the notification centre was already open
+- Long fenced-code lines were clipped in both surfaces; they now wrap
+- Toast text was replaced 100 ms after insertion, flashing raw Markdown and re-announcing the notification to screen readers
+- The colour style grammar backtracked quadratically on a hostile value
+- A truncated message could split a surrogate pair
+
 ## [1.2.34] - 2026-10-31
 
 ### Changed

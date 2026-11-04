@@ -13,6 +13,7 @@ Runs next to a JupyterLab server. POSTs a notification, the lab tab shows it. Fl
 - `--now` interrupts every open tab at once. Use for a job that finished, not for chatter
 - `--command` runs any JupyterLab command id when the button is clicked, `--command-args` carries its JSON arguments: `help:open` opens a URL, `docmanager:open` a file, `terminal:create-new` a terminal. Never put a command button on a message whose text came from somewhere you do not trust
 - Server must have the extension loaded. No extension, request 404s and nothing shows
+- `--message` accepts GitHub-flavoured Markdown and a small HTML subset: bold, italic, code, links, and `span` with `color` or `font-size`. Anything else is removed
 
 ## Local web app, handed over as a button
 

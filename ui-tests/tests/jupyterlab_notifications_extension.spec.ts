@@ -465,3 +465,276 @@ for (const mode of ['closed by the server', 'rejected as forbidden']) {
     expect(attempts).toBeLessThanOrEqual(5);
   });
 }
+
+/** POST one notification through this extension's ingest route. */
+async function postNotification(
+  page: any,
+  data: Record<string, unknown>
+): Promise<void> {
+  const baseUrl = page.url().replace(/\/lab.*$/, '');
+  const response = await page.request.post(
+    `${baseUrl}/jupyterlab-notifications-extension/ingest`,
+    { data }
+  );
+  expect(response.ok()).toBe(true);
+}
+
+/**
+ * Formatting reaches the operator only if the rendered elements are on screen,
+ * so these cases read the toast DOM rather than the message string.
+ */
+test('should render Markdown and an allowed inline style in a toast', async ({
+  page
+}) => {
+  await page.goto();
+  await labReady(page);
+
+  await postNotification(page, {
+    message:
+      'Formatting probe **bold** and `inline code`\n\n- first item\n- second item\n\n<span style="color: #e91e63; font-size: 18px">styled span</span>',
+    autoClose: false,
+    immediate: true
+  });
+
+  const message = page.locator('.jp-toast-message', {
+    hasText: 'Formatting probe'
+  });
+  await expect(message).toBeVisible({ timeout: 10000 });
+
+  await expect(message.locator('strong')).toHaveText('bold');
+  await expect(message.locator('code')).toHaveText('inline code');
+  await expect(message.locator('li')).toHaveText(['first item', 'second item']);
+
+  // Computed values, not the attribute text: a sanitised but inert attribute
+  // would look identical in the markup and leave the operator nothing to read.
+  const span = message.locator('span');
+  await expect(span).toHaveText('styled span');
+  await expect(span).toHaveCSS('color', 'rgb(233, 30, 99)');
+  await expect(span).toHaveCSS('font-size', '18px');
+});
+
+test('should render a link that opens in a new tab without an opener', async ({
+  page
+}) => {
+  await page.goto();
+  await labReady(page);
+
+  await postNotification(page, {
+    message: 'Link probe [example docs](https://example.com/docs)',
+    autoClose: false,
+    immediate: true
+  });
+
+  const message = page.locator('.jp-toast-message', { hasText: 'Link probe' });
+  const link = message.locator('a', { hasText: 'example docs' });
+  await expect(link).toBeVisible({ timeout: 10000 });
+  await expect(link).toHaveAttribute('href', 'https://example.com/docs');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+});
+
+test('should render the same markup in the notification centre', async ({
+  page
+}) => {
+  await page.goto();
+  await labReady(page);
+
+  await postNotification(page, {
+    message:
+      'Centre probe **bold** and `inline code` [centre link](https://example.com/centre)',
+    autoClose: false,
+    immediate: true
+  });
+
+  await expect(
+    page.locator('.jp-toast-message', { hasText: 'Centre probe' })
+  ).toBeVisible({ timeout: 10000 });
+
+  await page.evaluate(async () => {
+    await (window as any).jupyterapp.commands.execute(
+      'apputils:display-notifications'
+    );
+  });
+
+  const row = page.locator('.jp-Notification-List-Item', {
+    hasText: 'Centre probe'
+  });
+  await expect(row).toBeVisible({ timeout: 10000 });
+
+  const message = row.locator('.jp-toast-message');
+  await expect(message.locator('strong')).toHaveText('bold');
+  await expect(message.locator('code')).toHaveText('inline code');
+  const link = message.locator('a', { hasText: 'centre link' });
+  await expect(link).toHaveAttribute('href', 'https://example.com/centre');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+});
+
+/**
+ * A transient notification is a toast and nothing else: its entry must leave
+ * the notification centre when the toast auto-closes. The non-transient
+ * notification posted afterwards is the control that proves the centre is
+ * rendering its list - an empty centre would satisfy the absence check alone.
+ */
+test('should keep a transient notification out of the notification centre', async ({
+  page
+}) => {
+  await page.goto();
+  await labReady(page);
+
+  const transientMessage = 'Transient centre probe';
+  await postNotification(page, {
+    message: transientMessage,
+    transient: true,
+    immediate: true,
+    autoClose: 1000
+  });
+
+  const toast = page.locator('.jp-toast-message', {
+    hasText: transientMessage
+  });
+  await expect(toast).toBeVisible({ timeout: 5000 });
+
+  // autoClose removes the toast; the extension then dismisses the entry.
+  await expect(toast).toBeHidden({ timeout: 10000 });
+
+  await page.evaluate(async () => {
+    await (window as any).jupyterapp.commands.execute(
+      'apputils:display-notifications'
+    );
+  });
+  await expect(page.locator('.jp-Notification-Center')).toBeVisible({
+    timeout: 10000
+  });
+
+  const transientRow = page.locator('.jp-Notification-List-Item', {
+    hasText: transientMessage
+  });
+  await expect(transientRow).toHaveCount(0);
+
+  const persistentMessage = 'Persistent centre probe';
+  await postNotification(page, {
+    message: persistentMessage,
+    immediate: true,
+    autoClose: false
+  });
+
+  await expect(
+    page.locator('.jp-Notification-List-Item', { hasText: persistentMessage })
+  ).toBeVisible({ timeout: 10000 });
+  // Re-checked after the list rendered a row, so the absence is measured on a
+  // centre that is demonstrably showing its contents.
+  await expect(transientRow).toHaveCount(0);
+});
+
+/**
+ * JupyterLab creates no toast for a notification that arrives while the centre
+ * is open - its toast listener returns early for the open list popup - so the
+ * extension's removal observer never sees a toast go and the tracked id would
+ * keep its centre row. injectTimeAgoIntoCenter reconciles such an id on the
+ * next centre render; the persistent control row is the proof that the render
+ * happened, so the absence is not measured on an empty centre.
+ */
+test('should drop a transient notification delivered to an open centre', async ({
+  page
+}) => {
+  await page.goto();
+  await labReady(page);
+
+  await page.evaluate(async () => {
+    await (window as any).jupyterapp.commands.execute(
+      'apputils:display-notifications'
+    );
+  });
+  await expect(page.locator('.jp-Notification-Center')).toBeVisible({
+    timeout: 10000
+  });
+
+  const transientMessage = 'Transient open-centre probe';
+  await postNotification(page, {
+    message: transientMessage,
+    transient: true,
+    immediate: true,
+    autoClose: 1000
+  });
+
+  const persistentMessage = 'Persistent open-centre probe';
+  await postNotification(page, {
+    message: persistentMessage,
+    immediate: true,
+    autoClose: false
+  });
+
+  await expect(
+    page.locator('.jp-Notification-List-Item', { hasText: persistentMessage })
+  ).toBeVisible({ timeout: 10000 });
+  await expect(
+    page.locator('.jp-Notification-List-Item', { hasText: transientMessage })
+  ).toHaveCount(0);
+});
+
+/**
+ * The sanitised output is asserted structurally: a browser does not run a
+ * script inserted through innerHTML, so the absence of the node, the handler
+ * and the href is the security property, and the global proves none ran.
+ */
+test('should strip scripts, event handlers and javascript: URLs in a toast', async ({
+  page
+}) => {
+  await page.goto();
+  await labReady(page);
+
+  await postNotification(page, {
+    message:
+      'Security probe <script>window.__notifXss = "script"</script>' +
+      '<img src="missing.png" onerror="window.__notifXss = \'error\'">' +
+      '<a href="javascript:window.__notifXss = \'href\'">unsafe link</a>',
+    autoClose: false,
+    immediate: true
+  });
+
+  const message = page.locator('.jp-toast-message', {
+    hasText: 'Security probe'
+  });
+  await expect(message).toBeVisible({ timeout: 10000 });
+
+  // The anchor survives without its href, so finding it also waits for the
+  // rendered markup to replace JupyterLab's plain text.
+  const link = message.locator('a', { hasText: 'unsafe link' });
+  await expect(link).toBeVisible({ timeout: 5000 });
+
+  await expect(message.locator('script')).toHaveCount(0);
+  await expect(message.locator('img')).toHaveCount(0);
+  await expect(message.locator('[onerror]')).toHaveCount(0);
+  expect(await link.getAttribute('href')).toBeNull();
+  expect(await page.evaluate(() => (window as any).__notifXss)).toBeUndefined();
+});
+
+/**
+ * apputils:notify calls the manager directly, the same path as the culler and
+ * file-upload toasts. Markdown in such a message must stay literal, because
+ * the text was never addressed to this extension's renderer.
+ */
+test('should leave a JupyterLab native notification as plain text', async ({
+  page
+}) => {
+  await page.goto();
+  await labReady(page);
+
+  await page.evaluate(async () => {
+    await (window as any).jupyterapp.commands.execute('apputils:notify', {
+      message: 'Native probe **bold** <span style="color: red">span</span>',
+      type: 'info',
+      options: { autoClose: false }
+    });
+  });
+
+  const message = page.locator('.jp-toast-message', {
+    hasText: 'Native probe'
+  });
+  await expect(message).toBeVisible({ timeout: 10000 });
+
+  await expect(message.locator('strong')).toHaveCount(0);
+  await expect(message.locator('span')).toHaveCount(0);
+  await expect(message).toContainText('Native probe **bold**');
+});

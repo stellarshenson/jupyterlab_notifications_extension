@@ -99,6 +99,45 @@ async def test_notification_with_actions(jp_fetch):
     assert notification["actions"][0]["label"] == "Retry"
 
 
+async def test_transient_ingest_round_trips(jp_fetch):
+    """A transient notification is stored and returned like any other.
+
+    The flag only tells the frontend to drop the entry when its toast closes;
+    the server still queues it, so a client that missed the push can show it.
+    """
+    await jp_fetch(
+        "jupyterlab-notifications-extension",
+        "ingest",
+        method="POST",
+        body=json.dumps({"message": "Toast only", "transient": True}),
+    )
+
+    response = await jp_fetch("jupyterlab-notifications-extension", "notifications")
+    notification = json.loads(response.body)["notifications"][0]
+
+    assert notification["message"] == "Toast only"
+    assert notification["transient"] is True
+
+
+@pytest.mark.parametrize("transient", ["yes", 1, {}])
+async def test_ingest_rejects_a_non_boolean_transient(jp_fetch, transient):
+    """A truthy non-boolean would reach the frontend as a value it cannot judge."""
+    with pytest.raises(Exception) as excinfo:
+        await jp_fetch(
+            "jupyterlab-notifications-extension",
+            "ingest",
+            method="POST",
+            body=json.dumps({"message": "ok", "transient": transient}),
+        )
+
+    response = excinfo.value.response
+    assert response.code == 400
+    assert json.loads(response.body) == {
+        "error": "'transient' must be true or false"
+    }
+    assert routes._notification_store == [], "a rejected payload must not queue"
+
+
 async def test_notification_ids_unique_across_drains(jp_fetch, monkeypatch):
     """Ids stay unique across a drain because the suffix is a counter, not len().
 

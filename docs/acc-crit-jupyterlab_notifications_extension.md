@@ -382,3 +382,87 @@ What the next release must carry before it is published
   - log: 2026-09-29T02:23:12Z @kj added
   - log: 2026-09-29T08:40:21Z @kj closed
 
+## Formatted notifications `FORMAT`
+
+Markdown and a small sanitised HTML subset rendered in notifications this extension creates.
+
+- log: 2026-11-04T15:46:38Z @kj category created
+
+- [x] `ACC-FORMAT-38-MARKDOWN` **Markdown rendering** - HIGH; GitHub-flavoured Markdown renders in a notification message: bold, italic, strikethrough, inline code, fenced code, block quotes, ordered and unordered lists, links and autolinks; a single newline becomes a line break
+  - evidence: render.spec.ts markdown conversion block passes 10 cases, including 'renders **bold** as strong' and 'renders a single newline as br'; Galata 'should render Markdown and an allowed inline style in a toast' passes in the 19/19 run
+  - test: run the markdown conversion block in src/__tests__/render.spec.ts and the Galata Markdown toast case
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-11-04T15:46:38Z @kj marked.parse with gfm and breaks produces HTML; DOMPurify keeps the allowlisted tags; the sanitised DOM is clipped to 140 visible characters
+  - log: 2026-11-04T15:46:38Z @kj added
+  - log: 2026-11-04T15:47:03Z @kj closed
+- [x] `ACC-FORMAT-39-STYLE` **Colour and font size** - HIGH; A span may set color or font-size from the documented value grammars; every other declaration, property and value is removed, including background, position, url(), expression(), var() and !important
+  - evidence: render.spec.ts inline styling block passes 5 cases and S18-S22 pass; Galata 'should render Markdown and an allowed inline style in a toast' reads computed color rgb(233, 30, 99) and font-size 18px
+  - test: run the inline styling block and S18-S22 in render.spec.ts, then read the computed colour and size in the Galata toast
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-11-04T15:46:49Z @kj the afterSanitizeAttributes hook parses the declaration list and keeps a property only when its value matches the color or font-size grammar; otherwise the style attribute is removed
+  - log: 2026-11-04T15:46:49Z @kj added
+  - log: 2026-11-04T15:47:03Z @kj closed
+- [x] `ACC-FORMAT-40-LINKS` **Link schemes and hardening** - CRITICAL; Only http, https and mailto hrefs survive; every kept anchor gets target=_blank and rel=noopener noreferrer; javascript, data, vbscript, relative and protocol-relative hrefs are removed
+  - evidence: render.spec.ts link contract block passes 4 cases and S3-S11 pass; Galata 'should render a link that opens in a new tab without an opener' asserts href, target=_blank and rel=noopener noreferrer
+  - test: run S3-S11 and the link contract block in render.spec.ts, then read href, target and rel in the Galata link case
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-11-04T15:46:49Z @kj ALLOWED_URI_REGEXP admits only http, https and mailto; the anchor hook re-checks href and overwrites target and rel, so a sender cannot choose either
+  - log: 2026-11-04T15:46:49Z @kj added
+  - log: 2026-11-04T15:47:03Z @kj closed
+- [x] `ACC-FORMAT-41-SANITISE` **Hostile markup removal** - CRITICAL; Script elements, event-handler attributes, javascript: and data: URLs, SVG and MathML payloads, and DOM-clobbering id, name, class and data attributes never survive sanitisation
+  - evidence: render.spec.ts security matrix passes all 37 cases; Galata 'should strip scripts, event handlers and javascript: URLs in a toast' passes and finds window.__notifXss undefined; mutant M6 fails that case
+  - test: run security matrix S1-S27 and S37 in render.spec.ts and the Galata script, handler and javascript case
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-11-04T15:46:49Z @kj DOMPurify allowlists tags and attributes, forbids script, svg, math and form elements, disables data and aria attributes, and a hook decides hrefs; sanitising runs before truncation
+  - log: 2026-11-04T15:46:49Z @kj added
+  - log: 2026-11-04T15:47:03Z @kj closed
+- [x] `ACC-FORMAT-42-OWNERSHIP` **Extension-owned notifications** - HIGH; Markdown and HTML render only for notifications created by this extension's receive path; JupyterLab's culler, file-upload and other-source notifications keep plain text
+  - evidence: Galata 'should leave a JupyterLab native notification as plain text' passes in the 19/19 run; it finds no strong and no span elements and reads literal **bold** text
+  - test: run the Galata native-notification case and confirm literal Markdown and span markup
+  - test-tags: E2E
+  - mechanism: 2026-11-04T15:46:54Z @kj ownership is membership in trackedNotifications, written only by displayNotification; applyRenderedMessage returns early for any id it does not hold
+  - log: 2026-11-04T15:46:54Z @kj added
+  - log: 2026-11-04T15:47:06Z @kj closed
+- [x] `ACC-FORMAT-43-SURFACES` **Toast and notification centre** - HIGH; The same rendered markup and link attributes appear in the toast and in the notification centre
+  - evidence: Galata 'should render Markdown and an allowed inline style in a toast' and 'should render the same markup in the notification centre' pass in the 19/19 run; both assert strong, code and the link attributes
+  - test: run the Galata toast and notification-centre cases and read strong, code and anchor attributes in both
+  - test-tags: E2E
+  - mechanism: 2026-11-04T15:46:54Z @kj both injectors call applyRenderedMessage on .jp-toast-message; the centre pairs rows positionally with Notification.manager.notifications and is guarded by a row-count equality
+  - log: 2026-11-04T15:46:54Z @kj added
+  - log: 2026-11-04T15:47:06Z @kj closed
+- [x] `ACC-FORMAT-44-PASSTHROUGH` **API and CLI passthrough** - HIGH; A message posted to the REST ingest route or sent with jupyterlab-notify reaches the renderer as the same string; neither the server nor the CLI escapes, truncates or rewrites it
+  - evidence: test_routes.py test_notification_fetch asserts the POSTed message returns unchanged; Galata Markdown case sends the string through /ingest; tmp/workflows/notification-formatting/cli-passthrough-check.py matched the captured CLI body message field byte for byte
+  - test: POST a Markdown string to /ingest and read the toast; capture the jupyterlab-notify JSON body and compare its message field
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-11-04T15:46:54Z @kj routes.py stores the payload message verbatim and cli.py puts the message argument into the JSON body verbatim; nothing between sender and renderer rewrites the string
+  - log: 2026-11-04T15:46:54Z @kj added
+  - log: 2026-11-04T15:47:06Z @kj closed
+- [x] `ACC-FORMAT-45-PREVIEW` **140-character preview** - MEDIUM; A rendered message shows at most 140 visible characters plus an ellipsis; text after the cut is removed and the ellipsis is a text node
+  - evidence: render.spec.ts S29 passes: a 100000-character input returns 141 characters including the ellipsis
+  - test: run S29 in render.spec.ts and read the longest visible text in the Galata Markdown toast
+  - test-tags: UNIT, E2E
+  - mechanism: 2026-11-04T15:46:54Z @kj the sanitised DOM is walked with a 140-character budget; whitespace-only text nodes do not count, a br counts one, and the ellipsis is appended to the last kept text node
+  - log: 2026-11-04T15:46:54Z @kj added
+  - log: 2026-11-04T15:47:06Z @kj closed
+- [x] `ACC-FORMAT-46-TRANSIENT-API` **Transient ingest field** - HIGH; The ingest endpoint accepts a boolean transient field, stores it and returns it in the fetched payload; a non-boolean value is rejected with 400
+  - evidence: test_routes.py::test_transient_ingest_round_trips and ::test_ingest_rejects_a_non_boolean_transient pass in the 187-passed run recorded in transient-tests.json
+  - test: run test_transient_ingest_round_trips and test_ingest_rejects_a_non_boolean_transient in test_routes.py
+  - test-tags: UNIT
+  - mechanism: 2026-11-04T19:24:44Z @kj routes.py reads transient with a false default, answers 400 unless it is a bool, and stores it on the queued notification, so the fetch returns the same value
+  - log: 2026-11-04T19:24:44Z @kj added
+  - log: 2026-11-04T19:24:51Z @kj closed
+- [x] `ACC-FORMAT-47-TRANSIENT-TOAST` **Transient dismissed with its toast** - HIGH; A transient notification is dismissed when its toast closes, so the notification centre does not retain it, while a non-transient notification is retained
+  - evidence: Galata 'should keep a transient notification out of the notification centre' passes in the 20/20 run; the mutant that removes the dismiss line fails the same case
+  - test: run the Galata case should keep a transient notification out of the notification centre
+  - test-tags: E2E
+  - mechanism: 2026-11-04T19:24:46Z @kj displayNotification records a transient id in transientIds; observeNotificationCenter reads removed Toastify nodes and dismisses the matching row, while a non-transient id is never recorded
+  - log: 2026-11-04T19:24:46Z @kj added
+  - log: 2026-11-04T19:24:53Z @kj closed
+- [x] `ACC-FORMAT-48-TRANSIENT-CLI` **Transient CLI flag and README** - MEDIUM; The CLI --transient flag sets the transient field and the README documents the flag
+  - evidence: test_cli.py::test_transient_flag_sets_payload_field and ::test_transient_absent_by_default pass in the 187-passed run; README line 83 documents transient and line 185 shows --transient
+  - test: run test_transient_flag_sets_payload_field and test_transient_absent_by_default in test_cli.py and read the README transient row and example
+  - test-tags: UNIT, MANUAL
+  - mechanism: 2026-11-04T19:24:48Z @kj argparse --transient is passed to send_notification_api, which sets payload transient true only when the flag is given; README documents the field and a --transient example
+  - log: 2026-11-04T19:24:48Z @kj added
+  - log: 2026-11-04T19:24:55Z @kj closed
+

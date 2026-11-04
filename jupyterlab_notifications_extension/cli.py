@@ -363,6 +363,7 @@ def send_notification_api(
     data: dict = None,
     token: str = None,
     immediate: bool = False,
+    transient: bool = False,
     verbose: bool = False
 ):
     """
@@ -381,6 +382,7 @@ def send_notification_api(
         data: Optional arbitrary data to attach to the notification
         token: Authentication token; every target needs one
         immediate: Push instantly to connected clients via WebSocket (--now)
+        transient: Dismiss the notification when its toast closes (--transient)
         verbose: Print debug information
     """
 
@@ -479,6 +481,9 @@ def send_notification_api(
 
     if immediate:
         payload["immediate"] = True
+
+    if transient:
+        payload["transient"] = True
 
     json_data = json.dumps(payload).encode('utf-8')
 
@@ -741,6 +746,12 @@ exit codes:
              "that receives it"
     )
     parser.add_argument(
+        "--transient",
+        action="store_true",
+        help="Show a toast only: dismiss the notification when the toast "
+             "closes, so it does not remain in the notification centre"
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Print debug information"
@@ -878,6 +889,7 @@ exit codes:
             data=data_dict,
             token=args.token,
             immediate=args.immediate,
+            transient=args.transient,
             verbose=args.verbose
         )
         return 0

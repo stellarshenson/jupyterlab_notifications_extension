@@ -76,12 +76,15 @@ Send notifications to JupyterLab. Requires authentication via an `Authorization:
 
 | Field       | Type           | Required | Default  | Description                                                                                                                            |
 | ----------- | -------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `message`   | string         | Yes      | -        | Notification text                                                                                                                      |
+| `message`   | string         | Yes      | -        | Notification message, rendered as Markdown with limited HTML (see [Message Formatting](#message-formatting))                           |
 | `type`      | string         | No       | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress`                                                          |
 | `autoClose` | number/boolean | No       | `5000`   | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast)                |
 | `immediate` | boolean        | No       | `false`  | Push instantly to connected clients via WebSocket instead of waiting for the next poll (see [Immediate Delivery](#immediate-delivery)) |
+| `transient` | boolean        | No       | `false`  | Dismiss the notification when its toast closes, so it does not remain in the notification center                                       |
 | `data`      | object         | No       | -        | Arbitrary JSON attached to the notification; every number in it must be finite                                                         |
 | `actions`   | array          | No       | `[]`     | Action buttons (see below)                                                                                                             |
+
+A transient notification lives only as long as its toast: its links and action buttons are removed when the toast closes, so nothing is left in the notification centre to interact with.
 
 **Action Button Schema**:
 
@@ -179,6 +182,9 @@ jupyterlab-notify -m "Background task finished" --auto-close 0
 
 # Immediate display (push now, don't wait for the next poll)
 jupyterlab-notify -m "Deploy finished" --now
+
+# Toast only: removed from the notification center when the toast closes
+jupyterlab-notify -m "Build finished" --transient
 ```
 
 **URL auto-detection**: Queries `jupyter server list --json` to find running servers and constructs the URL from the record's own scheme, host and port, substituting a loopback address for a wildcard bind. When several are running and none matches `JUPYTERHUB_SERVICE_PREFIX`, it lists them and exits 2 rather than guess. Falls back to `JUPYTERHUB_SERVICE_PREFIX`, then to `http://127.0.0.1:$JUPYTER_PORT` (port 8888 when unset). An explicit `--url` that matches a listed record is re-addressed to that record's own host, so the host printed can differ from the host given: `--url http://localhost:8888` for a server bound to 0.0.0.0 is sent to `http://127.0.0.1:8888`. Any query string or fragment in `--url` is dropped, because the endpoint path is appended to the URL. Do not put a password in any `--url`: the `user:password@` part is dropped from a `--url` that names a host, because this tool authenticates by token only, but two malformed shapes keep it - one with no `//` at all, where the whole `user:password@host` is read as a path, and one whose password holds an unencoded `/`, where the host part ends at that slash.
@@ -230,6 +236,31 @@ By default a notification waits up to 30 seconds for the frontend's next poll be
 
 Each notification displays a relative timestamp (e.g., `just now`, `5m ago`, `2h ago`, `3d ago`) that updates every 10 seconds while the notification remains visible. Anything under a minute shows `just now`. The indicator appears below the message when no action buttons are present, or inline with the button bar when buttons exist. The notification center panel also shows time-ago for all listed notifications.
 
+## Message Formatting
+
+`message` may carry GitHub-flavoured Markdown and a small HTML subset, sanitised before display. Rendering applies to notifications this extension creates, in both the toast and the notification center. A single newline becomes a line break; paragraphs, bold, italic, strikethrough, inline code, fenced code, block quotes, ordered and unordered lists, and links including autolinks all render. Headings, tables, task-list checkboxes and images are not in the allowlist below, so they show as their text only or not at all.
+
+The only tags kept are `p`, `br`, `strong`, `b`, `em`, `i`, `u`, `s`, `del`, `code`, `pre`, `blockquote`, `ul`, `ol`, `li`, `a` and `span`, and the only attributes are `href`, `title`, `style`, `target` and `rel`. Everything else is removed, including `script`, `style`, `iframe`, `object`, `embed`, `form`, `input`, `img`, `svg`, `math`, `id`, `name`, `class`, `data-*`, `aria-*` and event handlers such as `onclick`.
+
+`style` may set only `color` and `font-size`, each checked against a value grammar:
+
+| Property    | Accepted values                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| `color`     | 3, 4, 6 or 8 digit hex; a colour keyword; `rgb()`, `rgba()`, `hsl()` or `hsla()`         |
+| `font-size` | `0`; 0 to 48 with `px`; 0 to 4 with `em` or `rem`; 0 to 300 with `%`; a CSS size keyword |
+
+Other declarations, including `background`, `position`, `url()`, `expression()`, `var()` and `!important`, are removed.
+
+Links keep only the `http`, `https` and `mailto` schemes. Other schemes, relative URLs and protocol-relative URLs lose their `href`. Every kept link opens in a new tab with `target="_blank"` and `rel="noopener noreferrer"`, and clicking it does not dismiss the notification.
+
+A message shows at most 140 visible characters plus an ellipsis, counted after rendering and sanitising. This matches the limit JupyterLab applies to its own notifications. Notifications created by JupyterLab or another extension, such as the culler and file-upload toasts, keep plain text and are never parsed as Markdown or HTML.
+
+A message mixing Markdown and a coloured span:
+
+```bash
+jupyterlab-notify -m '**Backup complete** in <span style="color: #2e7d32">12 minutes</span>. Download the [report](https://example.com/report).'
+```
+
 ## Architecture
 
 No per-recipient addressing: a notification is posted to one server, and the poll queue is taken by the first tab that polls.
@@ -275,61 +306,3 @@ From a clone, into Claude Code:
 ```bash
 ln -sfn "$PWD/.agents/skills/jupyterlab-notifications-extension" ~/.claude/skills/jupyterlab-notifications-extension
 ```
-
-## Development
-
-### Setup
-
-Requires NodeJS to build the extension. Uses `jlpm` (JupyterLab's pinned yarn) for package management.
-
-```bash
-# Install in development mode
-python -m venv .venv
-source .venv/bin/activate
-pip install --editable ".[dev,test]"
-
-# Link extension with JupyterLab
-jupyter labextension develop . --overwrite
-jupyter server extension enable jupyterlab_notifications_extension
-
-# Build TypeScript
-jlpm build
-```
-
-### Development workflow
-
-Run `jlpm watch` in one terminal to auto-rebuild on changes, and `jupyter lab` in another. Refresh browser after rebuilds to load changes.
-
-```bash
-jlpm watch           # Auto-rebuild on file changes
-jupyter lab          # Run JupyterLab
-```
-
-### Cleanup
-
-```bash
-jupyter server extension disable jupyterlab_notifications_extension
-pip uninstall jupyterlab_notifications_extension
-# Remove symlink: find via `jupyter labextension list`
-```
-
-### Testing
-
-**Python tests** (Pytest):
-
-```bash
-pip install -e ".[test]"
-pytest -vv -r ap --cov jupyterlab_notifications_extension
-```
-
-**Frontend tests** (Jest):
-
-```bash
-jlpm test
-```
-
-**Integration tests** (Playwright/Galata): See [ui-tests/README.md](ui-tests/README.md)
-
-### Packaging
-
-See [RELEASE.md](RELEASE.md) for release procedures.

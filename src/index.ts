@@ -12,6 +12,7 @@ import {
   ReadonlyPartialJSONObject
 } from '@lumino/coreutils';
 
+import { renderNotificationHtml } from './render';
 import { requestAPI, API_NAMESPACE } from './request';
 import { formatTimeAgo, reconnectDelay } from './utils';
 
@@ -35,6 +36,7 @@ interface INotificationData {
   type: 'default' | 'info' | 'success' | 'warning' | 'error' | 'in-progress';
   autoClose: number | false;
   createdAt: number;
+  transient?: boolean;
   actions?: INotificationAction[];
   data?: ReadonlyJSONValue;
 }
@@ -60,11 +62,17 @@ const POLL_INTERVAL = 30000;
 const MAX_TRACKED_NOTIFICATIONS = 500;
 
 /**
- * Module-level map from notification id to the server-side createdAt.
+ * IDs of notifications this extension displayed, held for the life of the tab.
  *
- * Keyed by id, never by message text: JupyterLab truncates a rendered message
- * at 140 characters, so the text in the DOM is not the text we sent, and two
- * notifications may legitimately carry the same message.
+ * An old centre row must still render after the message cache evicts, and the
+ * set holds only ids, small next to JupyterLab's own unbounded notification
+ * list.
+ */
+const ownedNotificationIds = new Set<string>();
+
+/**
+ * Server timestamps for notifications this extension displayed, bounded to
+ * MAX_TRACKED_NOTIFICATIONS (oldest evicted).
  */
 const serverCreatedAt = new Map<string, number>();
 
@@ -149,12 +157,39 @@ function placeTimeAgo(
  * Resolve the createdAt for a notification id, preferring the server value.
  */
 function createdAtFor(notifId: string): number | null {
-  const fromServer = serverCreatedAt.get(notifId);
-  if (fromServer !== undefined) {
-    return fromServer;
+  const createdAt = serverCreatedAt.get(notifId);
+  if (createdAt !== undefined) {
+    return createdAt;
   }
   const entry = Notification.manager.notifications.find(n => n.id === notifId);
   return entry ? entry.createdAt : null;
+}
+
+/**
+ * Marks a message element whose contents this extension rendered, and for
+ * which notification. Also the idempotence guard: the observer watches
+ * childList only, so setting the attribute schedules no further pass.
+ */
+const RENDERED_ATTRIBUTE = 'data-jp-notif-rendered';
+
+/**
+ * Replace a message element's contents with the rendered form of the raw
+ * message, for notifications this extension created only. Other notifications
+ * keep JupyterLab's plain text.
+ */
+function applyRenderedMessage(msgEl: Element, notifId: string): void {
+  if (!ownedNotificationIds.has(notifId)) {
+    return;
+  }
+  if (msgEl.getAttribute(RENDERED_ATTRIBUTE) === notifId) {
+    return;
+  }
+  const entry = Notification.manager.notifications.find(n => n.id === notifId);
+  if (entry === undefined) {
+    return;
+  }
+  msgEl.innerHTML = renderNotificationHtml(entry.message);
+  msgEl.setAttribute(RENDERED_ATTRIBUTE, notifId);
 }
 
 /**
@@ -169,6 +204,7 @@ function injectTimeAgoIntoToast(toast: HTMLElement): void {
   if (!msgEl || !toast.id) {
     return;
   }
+  applyRenderedMessage(msgEl, toast.id);
   const createdAt = createdAtFor(toast.id);
   if (createdAt === null) {
     return;
@@ -186,6 +222,13 @@ function injectTimeAgoIntoToast(toast: HTMLElement): void {
  * notification's timestamp.
  */
 function injectTimeAgoIntoCenter(center: Element): void {
+  // The centre's rows carry no DOM id, so a tracked id with no element means its toast is gone and the entry must not be retained.
+  for (const id of Array.from(transientIds)) {
+    if (document.getElementById(id) === null) {
+      Notification.manager.dismiss(id);
+      transientIds.delete(id);
+    }
+  }
   const rows = Array.from(
     center.querySelectorAll('.jp-Notification-List-Item')
   );
@@ -200,6 +243,7 @@ function injectTimeAgoIntoCenter(center: Element): void {
       return;
     }
     const entry = entries[i];
+    applyRenderedMessage(msgEl, entry.id);
     const createdAt = serverCreatedAt.get(entry.id) ?? entry.createdAt;
     placeTimeAgo(msgEl, createdAt, false);
   });
@@ -216,6 +260,21 @@ function injectTimeAgoIntoCenter(center: Element): void {
 function observeNotificationCenter(): void {
   const observer = new MutationObserver(mutations => {
     for (const mutation of mutations) {
+      // A transient notification's toast closing removes the notification
+      // center entry with it.
+      for (let i = 0; i < mutation.removedNodes.length; i++) {
+        const node = mutation.removedNodes[i];
+        if (!(node instanceof HTMLElement)) {
+          continue;
+        }
+        const toast = node.classList.contains('Toastify__toast')
+          ? node
+          : node.querySelector('.Toastify__toast');
+        if (toast instanceof HTMLElement && transientIds.has(toast.id)) {
+          Notification.manager.dismiss(toast.id);
+          transientIds.delete(toast.id);
+        }
+      }
       for (let i = 0; i < mutation.addedNodes.length; i++) {
         const node = mutation.addedNodes[i];
         if (!(node instanceof HTMLElement)) {
@@ -226,12 +285,14 @@ function observeNotificationCenter(): void {
           ? node
           : node.querySelector('.jp-Notification-Center');
         if (center) {
+          injectTimeAgoIntoCenter(center);
           setTimeout(() => injectTimeAgoIntoCenter(center), DOM_SETTLE_MS);
           continue;
         }
         // Also catch list items added inside an existing center
         const existingCenter = node.closest('.jp-Notification-Center');
         if (existingCenter) {
+          injectTimeAgoIntoCenter(existingCenter);
           setTimeout(
             () => injectTimeAgoIntoCenter(existingCenter),
             DOM_SETTLE_MS
@@ -243,6 +304,8 @@ function observeNotificationCenter(): void {
           ? node
           : node.querySelector('.Toastify__toast');
         if (toast instanceof HTMLElement) {
+          // Apply now; the timeout below retries once the toast DOM settles.
+          injectTimeAgoIntoToast(toast);
           setTimeout(() => injectTimeAgoIntoToast(toast), DOM_SETTLE_MS);
         }
       }
@@ -259,6 +322,13 @@ function observeNotificationCenter(): void {
  * large cap is ample and prevents unbounded growth on long-lived tabs.
  */
 const seenNotificationIds = new Set<string>();
+
+/**
+ * IDs of transient notifications to dismiss when their toast goes. A transient
+ * notification is meant to live only as long as its toast, so the notification
+ * centre entry is removed as soon as the toast's element leaves the DOM.
+ */
+const transientIds = new Set<string>();
 
 /**
  * Display a single notification, skipping duplicates by id.
@@ -320,13 +390,24 @@ function displayNotification(
     options
   );
 
-  // Record the server timestamp against the id the toast will carry; the
-  // MutationObserver places the element once the toast is rendered.
+  // Own the id so the observer renders this notification, and record the server
+  // timestamp. The raw message is read back from the manager: the DOM text is
+  // truncated, so it cannot be recovered from there.
+  ownedNotificationIds.add(notifId);
   serverCreatedAt.set(notifId, notif.createdAt);
   if (serverCreatedAt.size > MAX_TRACKED_NOTIFICATIONS) {
     const oldestKey = serverCreatedAt.keys().next().value;
     if (oldestKey !== undefined) {
       serverCreatedAt.delete(oldestKey);
+    }
+  }
+
+  if (notif.transient) {
+    transientIds.add(notifId);
+    // Silent mode creates no toast, so no removal will ever arrive.
+    if (typeof notif.autoClose === 'number' && notif.autoClose <= 0) {
+      Notification.manager.dismiss(notifId);
+      transientIds.delete(notifId);
     }
   }
 }
