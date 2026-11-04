@@ -5,38 +5,47 @@
 [![PyPI version](https://img.shields.io/pypi/v/jupyterlab-notifications-extension.svg)](https://pypi.org/project/jupyterlab-notifications-extension/)
 [![Total PyPI downloads](https://static.pepy.tech/badge/jupyterlab-notifications-extension)](https://pepy.tech/project/jupyterlab-notifications-extension)
 [![JupyterLab 4](https://img.shields.io/badge/JupyterLab-4-orange.svg)](https://jupyterlab.readthedocs.io/en/stable/)
+[![Brought To You By KOLOMOLO](https://img.shields.io/badge/Brought%20To%20You%20By-KOLOMOLO-00ffff?style=flat)](https://kolomolo.com)
+[![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-blue?style=flat)](https://www.paypal.com/donate/?hosted_button_id=B4KPBJDLLXTSA)
 
 > [!TIP]
 > This extension is part of the [stellars_jupyterlab_extensions](https://github.com/stellarshenson/stellars_jupyterlab_extensions) metapackage. Install all Stellars extensions at once: `pip install stellars_jupyterlab_extensions`
 
-JupyterLab extension for sending notifications using the native JupyterLab notification system. External systems and extensions send alerts and status updates that appear in JupyterLab's notification center.
+JupyterLab extension that shows notifications from external systems in the native notification system: a toast, the notification center, and optional action buttons. Messages may carry simple Markdown and a small HTML subset.
 
-This extension serves as the notification backbone for [Stellars JupyterHub Platform for Data Science](https://github.com/stellarshenson/stellars-jupyterhub-ds), allowing administrators to send notification messages to a running JupyterLab server. Each send addresses one server.
-
-Notification types with distinct visual styling provide clear status communication:
+The extension is the notification backbone for [Stellars JupyterHub Platform for Data Science](https://github.com/stellarshenson/stellars-jupyterhub-ds). A notification is posted to one JupyterLab server and shown to every open tab of that server.
 
 ![Notification Types](.resources/screenshot-notifications.png)
 
-Access via command palette for quick manual notification sending:
+The command palette sends a notification by hand:
 
 ![Command Palette](.resources/screenshot-palette.png)
 
-Interactive dialog with message input, type selection, auto-close timing, and an optional dismiss button:
+## Features
 
-![Send Dialog](.resources/screenshot-command.png)
+- REST API for external systems, with token authentication
+- Command palette dialog and the programmatic `jupyterlab-notifications:send` command
+- Six notification types: default, info, success, warning, error, in-progress
+- Auto-close in milliseconds, manual dismiss, or silent mode that shows the center only
+- Action buttons that run any JupyterLab command
+- Markdown and sanitised HTML rendering, including colour and font-size spans
+- Dynamic time-ago indicator on every notification
+- 30-second polling, with an immediate WebSocket push for `--now`
+- `transient` notifications that leave nothing in the notification center
 
-**Key Features:**
+## Agent Skill
 
-- REST API for external systems to POST notifications with authentication
-- Command palette integration with interactive dialog
-- Programmatic command API for extensions and automation
-- Six notification types (default, info, success, warning, error, in-progress)
-- Configurable auto-close with millisecond precision or manual dismiss
-- Action buttons with optional JupyterLab command execution
-- Dynamic time-ago indicator showing when each notification was generated
-- Best-effort delivery via 30-second polling (the first tab to poll takes it)
-- Immediate WebSocket push for instant display (`--now` / `"immediate": true`)
-- In-memory queue cleared after delivery
+`.agents/skills/jupyterlab-notifications-extension/SKILL.md` tells an AI assistant how to drive the `jupyterlab-notify` CLI. It carries the rules `--help` cannot state; the command reference stays in `--help`.
+
+The skill ships in the repository and in the wheel, at `<sys.prefix>/share/jupyter/agents/skills/jupyterlab-notifications-extension/SKILL.md`. One of the two links below makes it readable:
+
+```bash
+# After pip install, with the Python that runs the lab
+mkdir -p ~/.agents/skills && ln -sfn "$(python -c 'import sys; print(sys.prefix)')/share/jupyter/agents/skills/jupyterlab-notifications-extension" ~/.agents/skills/jupyterlab-notifications-extension
+
+# From a clone, into Claude Code
+ln -sfn "$PWD/.agents/skills/jupyterlab-notifications-extension" ~/.claude/skills/jupyterlab-notifications-extension
+```
 
 ## Installation
 
@@ -44,17 +53,13 @@ Interactive dialog with message input, type selection, auto-close timing, and an
 pip install jupyterlab_notifications_extension
 ```
 
-**Requirements**: JupyterLab >= 4.6.0, Python >= 3.12
+Requires JupyterLab 4.6.0 or later and Python 3.12 or later.
 
 ## API Reference
 
 ### POST /jupyterlab-notifications-extension/ingest
 
-Send notifications to JupyterLab. Requires authentication via an `Authorization: token <TOKEN>` header. Do not put the token in the URL, where it lands in server and proxy access logs.
-
-**Endpoint**: `POST /jupyterlab-notifications-extension/ingest`
-
-**Request Body** (application/json):
+Posts one notification. Authentication is an `Authorization: token <TOKEN>` header; do not put the token in the URL, where it lands in server and proxy access logs.
 
 ```json
 {
@@ -62,6 +67,7 @@ Send notifications to JupyterLab. Requires authentication via an `Authorization:
   "type": "info",
   "autoClose": 5000,
   "immediate": true,
+  "transient": true,
   "actions": [
     {
       "label": "Click here",
@@ -71,8 +77,6 @@ Send notifications to JupyterLab. Requires authentication via an `Authorization:
   ]
 }
 ```
-
-**Request Parameters**:
 
 | Field       | Type           | Required | Default  | Description                                                                                                                            |
 | ----------- | -------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -84,9 +88,7 @@ Send notifications to JupyterLab. Requires authentication via an `Authorization:
 | `data`      | object         | No       | -        | Arbitrary JSON attached to the notification; every number in it must be finite                                                         |
 | `actions`   | array          | No       | `[]`     | Action buttons (see below)                                                                                                             |
 
-A transient notification lives only as long as its toast: its links and action buttons are removed when the toast closes, so nothing is left in the notification centre to interact with.
-
-**Action Button Schema**:
+A transient notification exists only while its toast is visible: its links and action buttons are removed with the toast.
 
 | Field         | Type   | Required | Default     | Description                                                      |
 | ------------- | ------ | -------- | ----------- | ---------------------------------------------------------------- |
@@ -96,9 +98,9 @@ A transient notification lives only as long as its toast: its links and action b
 | `commandId`   | string | No       | -           | JupyterLab command ID to execute (e.g., `filebrowser:open-path`) |
 | `args`        | object | No       | `{}`        | Arguments passed to the command                                  |
 
-Note: Clicking any button dismisses the notification. If `commandId` is provided, the specified JupyterLab command executes before dismissal.
+Any button click dismisses the notification; a `commandId` runs that command first.
 
-**Response** (200 OK):
+Response `200 OK`:
 
 ```json
 {
@@ -107,115 +109,80 @@ Note: Clicking any button dismisses the notification. If `commandId` is provided
 }
 ```
 
-**Error Responses**:
+Errors:
 
 - `400 Bad Request` - invalid JSON, a body that is not a JSON object, a `message` that is missing, empty or not a string, an `actions` that is not a list, an action element that is not an object with a string `label`, or a number anywhere in the payload that is not finite (`NaN`, `Infinity`, or a literal that overflows to one)
-- `403 Forbidden` - Missing or invalid authentication token
-- `500 Internal Server Error` - Server-side processing error
+- `403 Forbidden` - missing or invalid authentication token
+- `500 Internal Server Error` - server-side processing error
 
 ## Usage Examples
 
-### From JupyterLab Extensions
-
-Send notifications programmatically from other extensions:
+### From another JupyterLab extension
 
 ```javascript
-// Basic notification
 await app.commands.execute('jupyterlab-notifications:send', {
-  message: 'Operation complete'
-});
-
-// Custom type and auto-close
-await app.commands.execute('jupyterlab-notifications:send', {
-  message: 'Build finished successfully',
+  message: 'Build finished',
   type: 'success',
   autoClose: 3000
 });
 
-// With dismiss button
 await app.commands.execute('jupyterlab-notifications:send', {
-  message: 'Error processing data',
-  type: 'error',
-  autoClose: false,
-  actions: [{ label: 'Dismiss', displayType: 'default' }]
-});
-
-// Action button that executes a JupyterLab command
-await app.commands.execute('jupyterlab-notifications:send', {
-  message: 'Help Available!',
+  message: 'Report ready',
   type: 'info',
   autoClose: false,
   actions: [
     {
-      label: 'Open Help',
-      commandId: 'iframe:open',
-      args: { path: 'local:///welcome.html' },
+      label: 'Open',
+      commandId: 'help:open',
+      args: { url: 'https://example.com/report' },
       displayType: 'accent'
     }
   ]
 });
 ```
 
-### CLI Tool
+### CLI
 
-The `jupyterlab-notify` command is installed with the extension:
+`jupyterlab-notify` is installed with the extension:
 
 ```bash
-# Basic notification (auto-detects URL from running servers)
 jupyterlab-notify -m "Deployment complete" -t success
-
-# With explicit URL (e.g., JupyterHub)
 jupyterlab-notify --url "http://127.0.0.1:8888/jupyterhub/user/alice" -m "Hello"
-
-# Persistent warning (no auto-close)
 jupyterlab-notify -m "System maintenance in 1 hour" -t warning --no-auto-close
-
-# With dismiss button
 jupyterlab-notify -m "Task complete" --action "Dismiss"
-
-# Action button that executes a JupyterLab command
 jupyterlab-notify -m "Help Available!" --action "Open Help" \
   --cmd "iframe:open" --command-args '{"path": "local:///welcome.html"}'
-
-# Silent mode (notification center only, no toast)
 jupyterlab-notify -m "Background task finished" --auto-close 0
-
-# Immediate display (push now, don't wait for the next poll)
 jupyterlab-notify -m "Deploy finished" --now
-
-# Toast only: removed from the notification center when the toast closes
 jupyterlab-notify -m "Build finished" --transient
 ```
 
-**URL auto-detection**: Queries `jupyter server list --json` to find running servers and constructs the URL from the record's own scheme, host and port, substituting a loopback address for a wildcard bind. When several are running and none matches `JUPYTERHUB_SERVICE_PREFIX`, it lists them and exits 2 rather than guess. Falls back to `JUPYTERHUB_SERVICE_PREFIX`, then to `http://127.0.0.1:$JUPYTER_PORT` (port 8888 when unset). An explicit `--url` that matches a listed record is re-addressed to that record's own host, so the host printed can differ from the host given: `--url http://localhost:8888` for a server bound to 0.0.0.0 is sent to `http://127.0.0.1:8888`. Any query string or fragment in `--url` is dropped, because the endpoint path is appended to the URL. Do not put a password in any `--url`: the `user:password@` part is dropped from a `--url` that names a host, because this tool authenticates by token only, but two malformed shapes keep it - one with no `//` at all, where the whole `user:password@host` is read as a path, and one whose password holds an unencoded `/`, where the host part ends at that slash.
+URL detection:
 
-**Authentication**: `JUPYTERLAB_NOTIFY_TOKEN` is this tool's own variable and is used for any target, including a remote one. Prefer it over `--token`, which puts the secret in argv where every local account can read `/proc/<pid>/cmdline`. The addressed server's own token is sent to the address its runtime record is reached at: 127.0.0.1 for a server bound to 0.0.0.0, and a host that might not be loopback if that server was started with `--ip <an address>`. The ambient `JUPYTERHUB_API_TOKEN` / `JPY_API_TOKEN` / `JUPYTER_TOKEN` belong to this host, not to the target, so they are sent only to a loopback target.
+- **Listed servers** - `jupyter server list --json`; the URL comes from the record's scheme, host and port, with a loopback address substituted for a wildcard bind
+- **Ambiguity** - several servers and none matching `JUPYTERHUB_SERVICE_PREFIX` prints the list and exits 2
+- **Fallback** - `JUPYTERHUB_SERVICE_PREFIX`, then `http://127.0.0.1:$JUPYTER_PORT`, port 8888 when unset
+- **Explicit `--url`** - a URL matching a listed record is re-addressed to that record's own host, so the host printed can differ from the host given
+- **Query and fragment** - dropped, because the endpoint path is appended to the URL
+- **No password in `--url`** - the `user:password@` part is dropped from a URL that names a host; two malformed shapes keep it, one with no `//` at all and one whose password holds an unencoded `/`
 
-**`--now`**: Pushes the notification instantly to every open JupyterLab tab via WebSocket instead of waiting up to 30 seconds for the next poll (see [Immediate Delivery](#immediate-delivery)).
+Authentication:
+
+- **`JUPYTERLAB_NOTIFY_TOKEN`** - this tool's own variable, used for any target; prefer it over `--token`, which puts the secret in argv where every local account can read it
+- **Server token** - sent to the address the server's runtime record is reached at: 127.0.0.1 for a server bound to 0.0.0.0, and the bound address for `--ip <address>`
+- **Ambient hub variables** - `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN` and `JUPYTER_TOKEN` belong to this host, so they are sent only to a loopback target
+
+`--now` pushes over the WebSocket instead of waiting for the next poll.
 
 ### cURL
 
 ```bash
-# Localhost - a token is required, as on any other host
 curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
   -H "Content-Type: application/json" \
   -H "Authorization: token YOUR_JUPYTER_TOKEN" \
   -d '{"message": "Build completed", "type": "success"}'
 
-# Localhost - warning that stays until dismissed
-curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
-  -H "Content-Type: application/json" \
-  -H "Authorization: token YOUR_JUPYTER_TOKEN" \
-  -d '{"message": "System maintenance in 1 hour", "type": "warning", "autoClose": false}'
-
-# Remote - requires authentication token
 curl -X POST http://jupyterhub.example.com/user/alice/jupyterlab-notifications-extension/ingest \
-  -H "Content-Type: application/json" \
-  -H "Authorization: token YOUR_JUPYTER_TOKEN" \
-  -d '{"message": "Deployment complete", "type": "info"}'
-
-# Immediate display - push now instead of waiting for the next poll
-curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
   -H "Content-Type: application/json" \
   -H "Authorization: token YOUR_JUPYTER_TOKEN" \
   -d '{"message": "Deploy finished", "type": "success", "immediate": true}'
@@ -223,26 +190,32 @@ curl -X POST http://localhost:8888/jupyterlab-notifications-extension/ingest \
 
 ## Immediate Delivery
 
-By default a notification waits up to 30 seconds for the frontend's next poll before it appears. Setting `immediate` (REST/cURL) or passing `--now` (CLI) pushes it instantly to every open JupyterLab tab over a WebSocket, so it displays the moment it is sent.
+By default a notification waits up to 30 seconds for the next poll. `immediate` (REST) or `--now` (CLI) pushes it to every open tab over a WebSocket.
 
-- **Transport**: the frontend keeps a WebSocket open to `/jupyterlab-notifications-extension/stream`; the server pushes flagged notifications to all connected clients
-- **Push reaches every connected tab**: unlike the poll, the immediate push is delivered to all currently-open tabs at once
-- **Poll is best-effort**: the poll queue is a single-consumer destructive drain - the first tab to poll empties it for all tabs - so a tab whose socket is down at push time is not guaranteed to receive that notification via the poll; the push is an accelerator over a best-effort baseline, not a durable per-client queue
-- **Keepalive**: the socket uses ping/pong to survive proxy idle timeouts (works behind JupyterHub)
-- **De-duplication**: the frontend tracks notification IDs (bounded), so a notification arriving via both the push and the poll is displayed only once
-- **Reconnect**: the socket reconnects with capped exponential backoff, 5 seconds doubling to a 60-second ceiling, and keeps retrying for as long as the tab is open. There is no give-up: while the socket is down this tab competes for the destructive poll queue with every other tab and can miss a `--now` notification outright, so it warns once in the browser console and keeps trying
+- **Transport** - the frontend keeps a WebSocket open to `/jupyterlab-notifications-extension/stream`
+- **Every connected tab** - the push reaches all open tabs at once
+- **Best-effort poll** - the queue is a single-consumer destructive drain, so a tab whose socket is down at push time is not guaranteed that notification
+- **Keepalive** - ping and pong survive proxy idle timeouts, including behind JupyterHub
+- **De-duplication** - notification ids are tracked, so a notification arriving by both push and poll is shown once
+- **Reconnect** - capped exponential backoff from 5 to 60 seconds, retrying while the tab stays open
 
 ## Time-Ago Indicator
 
-Each notification displays a relative timestamp (e.g., `just now`, `5m ago`, `2h ago`, `3d ago`) that updates every 10 seconds while the notification remains visible. Anything under a minute shows `just now`. The indicator appears below the message when no action buttons are present, or inline with the button bar when buttons exist. The notification center panel also shows time-ago for all listed notifications.
+Each notification shows a relative timestamp that updates every 10 seconds: `just now` under a minute, then minutes, hours and days. The indicator sits below the message, or inline with the button bar when actions exist. The notification center shows the same indicator for every listed notification.
 
 ## Message Formatting
 
-`message` may carry GitHub-flavoured Markdown and a small HTML subset, sanitised before display. Rendering applies to notifications this extension creates, in both the toast and the notification center. A single newline becomes a line break; paragraphs, bold, italic, strikethrough, inline code, fenced code, block quotes, ordered and unordered lists, and links including autolinks all render. Headings, tables, task-list checkboxes and images are not in the allowlist below, so they show as their text only or not at all.
+`message` renders as GitHub-flavoured Markdown and a small HTML subset, sanitised before display, in both the toast and the center. A single newline becomes a line break.
 
-The only tags kept are `p`, `br`, `strong`, `b`, `em`, `i`, `u`, `s`, `del`, `code`, `pre`, `blockquote`, `ul`, `ol`, `li`, `a` and `span`, and the only attributes are `href`, `title`, `style`, `target` and `rel`. Everything else is removed, including `script`, `style`, `iframe`, `object`, `embed`, `form`, `input`, `img`, `svg`, `math`, `id`, `name`, `class`, `data-*`, `aria-*` and event handlers such as `onclick`.
+- **Rendered** - paragraphs, bold, italic, strikethrough, inline and fenced code, block quotes, ordered and unordered lists, links and autolinks
+- **Tags kept** - `p`, `br`, `strong`, `b`, `em`, `i`, `u`, `s`, `del`, `code`, `pre`, `blockquote`, `ul`, `ol`, `li`, `a`, `span`
+- **Attributes kept** - `href`, `title`, `style`, `target`, `rel`
+- **Removed** - everything else, including `script`, `style`, `iframe`, `object`, `embed`, `form`, `input`, `img`, `svg`, `math`, `id`, `name`, `class`, `data-*`, `aria-*` and event handlers such as `onclick`
+- **Links** - http, https and mailto only; a kept link opens in a new tab with `target="_blank"` and `rel="noopener noreferrer"`, and clicking it does not dismiss the notification
+- **Preview** - at most 140 visible characters plus an ellipsis, counted after rendering
+- **Other sources** - notifications from JupyterLab or another extension keep plain text and are never parsed
 
-`style` may set only `color` and `font-size`, each checked against a value grammar:
+`style` accepts two properties:
 
 | Property    | Accepted values                                                                          |
 | ----------- | ---------------------------------------------------------------------------------------- |
@@ -251,58 +224,22 @@ The only tags kept are `p`, `br`, `strong`, `b`, `em`, `i`, `u`, `s`, `del`, `co
 
 Other declarations, including `background`, `position`, `url()`, `expression()`, `var()` and `!important`, are removed.
 
-Links keep only the `http`, `https` and `mailto` schemes. Other schemes, relative URLs and protocol-relative URLs lose their `href`. Every kept link opens in a new tab with `target="_blank"` and `rel="noopener noreferrer"`, and clicking it does not dismiss the notification.
-
-A message shows at most 140 visible characters plus an ellipsis, counted after rendering and sanitising. This matches the limit JupyterLab applies to its own notifications. Notifications created by JupyterLab or another extension, such as the culler and file-upload toasts, keep plain text and are never parsed as Markdown or HTML.
-
-A message mixing Markdown and a coloured span:
-
 ```bash
 jupyterlab-notify -m '**Backup complete** in <span style="color: #2e7d32">12 minutes</span>. Download the [report](https://example.com/report).'
 ```
 
 ## Architecture
 
-No per-recipient addressing: a notification is posted to one server, and the poll queue is taken by the first tab that polls.
-
-**Flow**: External system POSTs to `/jupyterlab-notifications-extension/ingest` -> Server queues in memory -> Frontend polls `/jupyterlab-notifications-extension/notifications` every 30 seconds -> Displays via JupyterLab notification manager -> Clears queue after fetch. Notifications flagged `immediate` are additionally pushed over a WebSocket (`/jupyterlab-notifications-extension/stream`) for instant display, deduplicated against the poll by notification ID.
+A notification is posted to one server; there is no per-recipient addressing. Flow: external POST → in-memory queue → frontend poll every 30 seconds → JupyterLab notification manager → queue cleared after the fetch. Notifications flagged `immediate` are also pushed over the WebSocket and deduplicated against the poll by id.
 
 ## Troubleshooting
 
-**Frontend installed but not working**:
-
-```bash
-jupyter server extension list  # Verify server extension enabled
-```
-
-**Server extension enabled but frontend missing**:
-
-```bash
-jupyter labextension list  # Verify frontend extension installed
-```
-
-**Notifications not appearing**: Check browser console for polling errors or verify JupyterLab was restarted after installation.
+- **Frontend installed but not working** - `jupyter server extension list` verifies the server extension
+- **Server extension enabled but frontend missing** - `jupyter labextension list` verifies the frontend extension
+- **Notifications not appearing** - check the browser console for polling errors; restart JupyterLab after installation
 
 ## Uninstall
 
 ```bash
 pip uninstall jupyterlab_notifications_extension
-```
-
-## Agent Skill
-
-`.agents/skills/jupyterlab-notifications-extension/SKILL.md` tells an AI assistant how to drive the `jupyterlab-notify` CLI. It carries only the rules `--help` cannot state; the command reference stays in `jupyterlab-notify --help`.
-
-The skill ships in the repository and in the wheel, which installs it at `<sys.prefix>/share/jupyter/agents/skills/jupyterlab-notifications-extension/SKILL.md`. No agent reads that directory, and a wheel cannot write into the home directory, so one of the two links below is what makes it readable.
-
-After `pip install`, with the Python that runs the lab:
-
-```bash
-mkdir -p ~/.agents/skills && ln -sfn "$(python -c 'import sys; print(sys.prefix)')/share/jupyter/agents/skills/jupyterlab-notifications-extension" ~/.agents/skills/jupyterlab-notifications-extension
-```
-
-From a clone, into Claude Code:
-
-```bash
-ln -sfn "$PWD/.agents/skills/jupyterlab-notifications-extension" ~/.claude/skills/jupyterlab-notifications-extension
 ```

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.3] - 2026-11-04
+
+### Changed
+
+- README rewritten in the technical documentation style: one overview sentence per section, and the CLI URL-detection and authentication paragraphs as bullets
+- Agent Skill section moved directly under Features
+- Badge row gains the Kolomolo attribution and PayPal donation badges
+- README drops the interactive dialog screenshot
+- The API request example now shows the `transient` field
+
 ## [1.3.2] - 2026-11-04
 
 ### Added
