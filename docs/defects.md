@@ -1455,6 +1455,13 @@ README and API reference accuracy against the code
   - test-tags: MANUAL
   - log: 2026-09-29T05:55:24Z @kj added
   - log: 2026-09-29T05:55:24Z @kj closed
+- [x] `DEF-DOCS-280-TRANSIENT-ERROR` **README error list omits the transient 400** - MINOR; ingest answers 400 "'transient' must be true or false" for a non-boolean transient; README 400 list names every other rejected field but not this one, so a REST caller sending "transient": "yes" finds no documented cause
+  - evidence: README.md 400 line now names a transient that is not true or false; test_routes.py test_ingest_rejects_a_non_boolean_transient proves the 400
+  - repro: POST ingest with {"message":"x","transient":"yes"} -> 400; grep transient in the README Errors list finds nothing
+  - root-cause: 2026-11-13T07:14:02Z @kj transient validation was added to routes.py without extending the README 400 line
+  - log: 2026-11-13T07:14:02Z @kj added
+  - log: 2026-11-13T07:14:27Z @kj closed
+  - log: 2026-11-13T07:14:32Z @kj edited evidence "README.md 400 line now names a transient that is not true or false; test_routes.py test_transient_must_be_boolean-style parametrised case covers the 400" -> "README.md 400 line now names a transient that is not true or false; test_routes.py test_ingest_rejects_a_non_boolean_transient proves the 400"
 
 ## Test harness `TEST`
 

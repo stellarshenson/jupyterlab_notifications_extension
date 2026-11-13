@@ -111,7 +111,7 @@ Response `200 OK`:
 
 Errors:
 
-- `400 Bad Request` - invalid JSON, a body that is not a JSON object, a `message` that is missing, empty or not a string, an `actions` that is not a list, an action element that is not an object with a string `label`, or a number anywhere in the payload that is not finite (`NaN`, `Infinity`, or a literal that overflows to one)
+- `400 Bad Request` - invalid JSON, a body that is not a JSON object, a `message` that is missing, empty or not a string, an `actions` that is not a list, an action element that is not an object with a string `label`, a `transient` that is not `true` or `false`, or a number anywhere in the payload that is not finite (`NaN`, `Infinity`, or a literal that overflows to one)
 - `403 Forbidden` - missing or invalid authentication token
 - `500 Internal Server Error` - server-side processing error
 
