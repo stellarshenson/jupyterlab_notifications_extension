@@ -381,7 +381,7 @@ def send_notification_api(
         actions: List of action dictionaries with label, caption, and displayType
         data: Optional arbitrary data to attach to the notification
         token: Authentication token; every target needs one
-        immediate: Push instantly to connected clients via WebSocket (--now)
+        immediate: Accepted for compatibility; no longer changes delivery (--now)
         transient: Dismiss the notification when its toast closes (--transient)
         verbose: Print debug information
     """
@@ -631,9 +631,6 @@ Examples:
 
   # Silent notification (notification center only)
   %(prog)s -m "Background task done" --auto-close 0
-
-  # Immediate display (push now, don't wait for the next poll)
-  %(prog)s -m "Deploy finished" --now
 
   # Remote server - the variable keeps the token out of argv
   JUPYTERLAB_NOTIFY_TOKEN=... %(prog)s -m "Hello" \\

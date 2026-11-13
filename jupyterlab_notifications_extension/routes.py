@@ -36,7 +36,7 @@ MAX_QUEUED_NOTIFICATIONS = 500
 # frontend's send dialog and the CLI both default to the same number.
 DEFAULT_AUTO_CLOSE_MS = 5000
 
-# Live WebSocket listeners for immediate ("--now") push delivery
+# Live WebSocket listeners for push delivery
 _stream_listeners: Set["NotificationStreamHandler"] = set()
 
 
@@ -65,7 +65,7 @@ class NotificationIngestHandler(APIHandler):
         "message": "Your notification message",
         "type": "info",  // optional: default, info, success, warning, error, in-progress
         "autoClose": 5000,  // optional: milliseconds or false for manual dismiss
-        "immediate": true,  // optional: push instantly to connected clients via WebSocket
+        "immediate": true,  // optional: accepted for compatibility; no longer changes delivery
         "transient": true,  // optional: dismiss when the toast closes
         "data": {},  // optional: arbitrary JSON; every number in it must be finite
         "actions": [  // optional
@@ -200,11 +200,11 @@ class NotificationFetchHandler(APIHandler):
 
 class NotificationStreamHandler(WebSocketMixin, WebSocketHandler, JupyterHandler):
     """
-    WebSocket endpoint for immediate notification delivery.
+    WebSocket endpoint for push notification delivery.
 
     The frontend keeps this socket open. The ingest handler pushes
-    notifications flagged 'immediate' to every connected listener for
-    instant display. The 30-second frontend poll remains the baseline.
+    every ingested notification to every connected listener. The
+    30-second frontend poll remains the fallback.
 
     Inherits WebSocketMixin for ping/pong keepalive (survives proxy
     idle timeouts) and JupyterHandler for authentication.
