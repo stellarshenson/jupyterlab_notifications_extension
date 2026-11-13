@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.7] - 2026-11-13
+
+### Changed
+
+- Close the push docstring defect and extend the journal entry
+- Describe the push as unconditional in docstrings and the cli epilog
+- Close the one-tab delivery defects and extend the journal entry
+- Close the link-check defect and extend the journal entry
+- Ignore the PayPal donate link in the link check
+- Name the transient 400 in the README error list
+
+### Fixed
+
+- Push every notification to every open tab
+
 ## [1.3.3] - 2026-11-04
 
 ### Changed
