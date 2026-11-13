@@ -1476,6 +1476,13 @@ README and API reference accuracy against the code
   - root-cause: 2026-11-13T07:57:03Z @kj the text described the opt-in push that the ONE-TAB defect of category IMMED removed
   - log: 2026-11-13T07:57:03Z @kj added
   - log: 2026-11-13T08:01:23Z @kj closed
+- [x] `DEF-DOCS-284-PUSH-DOCSTRINGS` **Docstrings, one comment and the --now epilog example still describe the push as opt-in** - MINOR; routes.py listener comment, payload docstring and stream handler docstring, the cli.py immediate docstring line and the --now epilog example said the push needs immediate or --now; fix: reworded, epilog example removed; immediate and --now stay accepted
+  - evidence: routes.py and cli.py docstrings and the listener comment say every ingested notification is pushed; the --now epilog example is removed; no test matched the old strings; pytest 195 passed at 1.3.6
+  - repro: read jupyterlab-notify --help examples and the routes.py NotificationStreamHandler docstring against the unconditional push in routes.py
+  - test-tags: MANUAL
+  - root-cause: 2026-11-13T08:14:42Z @kj the round 1 text fix of PUSH-TEXT covered a listed set of sentences and these five were outside that list
+  - log: 2026-11-13T08:14:42Z @kj added
+  - log: 2026-11-13T08:14:54Z @kj closed
 
 ## Test harness `TEST`
 
