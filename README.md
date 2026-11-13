@@ -78,15 +78,15 @@ Posts one notification. Authentication is an `Authorization: token <TOKEN>` head
 }
 ```
 
-| Field       | Type           | Required | Default  | Description                                                                                                                            |
-| ----------- | -------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `message`   | string         | Yes      | -        | Notification message, rendered as Markdown with limited HTML (see [Message Formatting](#message-formatting))                           |
-| `type`      | string         | No       | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress`                                                          |
-| `autoClose` | number/boolean | No       | `5000`   | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast)                |
+| Field       | Type           | Required | Default  | Description                                                                                                                                  |
+| ----------- | -------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `message`   | string         | Yes      | -        | Notification message, rendered as Markdown with limited HTML (see [Message Formatting](#message-formatting))                                 |
+| `type`      | string         | No       | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress`                                                                |
+| `autoClose` | number/boolean | No       | `5000`   | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast)                      |
 | `immediate` | boolean        | No       | `false`  | Accepted for compatibility; no longer changes delivery, because every notification is pushed (see [Immediate Delivery](#immediate-delivery)) |
-| `transient` | boolean        | No       | `false`  | Dismiss the notification when its toast closes, so it does not remain in the notification center                                       |
-| `data`      | object         | No       | -        | Arbitrary JSON attached to the notification; every number in it must be finite                                                         |
-| `actions`   | array          | No       | `[]`     | Action buttons (see below)                                                                                                             |
+| `transient` | boolean        | No       | `false`  | Dismiss the notification when its toast closes, so it does not remain in the notification center                                             |
+| `data`      | object         | No       | -        | Arbitrary JSON attached to the notification; every number in it must be finite                                                               |
+| `actions`   | array          | No       | `[]`     | Action buttons (see below)                                                                                                                   |
 
 A transient notification exists only while its toast is visible: its links and action buttons are removed with the toast.
 

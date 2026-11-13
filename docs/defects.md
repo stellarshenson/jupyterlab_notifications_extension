@@ -178,11 +178,13 @@ Instant WebSocket push for --now notifications, and the 30s poll it falls back t
   - root-cause: 2026-09-28T19:38:24Z @kj attempts reset only in onopen and the give-up branch returned without rescheduling; the poll it fell back to is a destructive single-consumer drain, so another tab can take the notification first
   - log: 2026-09-28T19:38:24Z @kj added
   - log: 2026-09-28T19:56:13Z @kj closed; reason: the evidence must state what is not proven: asserting indefinite retry needs a run longer than the whole suite, so the deletion and the unchanged backoff are what is demonstrated
-- [ ] `DEF-IMMED-282-ONE-TAB` **A notification without immediate reaches one open tab only** - MAJOR; ingest pushed over the WebSocket only under the immediate flag, so a default POST or a call without --now waited up to 30 s and showed in the first tab to poll, while the README says every open tab; fix: every notification is pushed, the poll stays as fallback; routes.py
+- [x] `DEF-IMMED-282-ONE-TAB` **A notification without immediate reaches one open tab only** - MAJOR; ingest pushed over the WebSocket only under the immediate flag, so a default POST or a call without --now waited up to 30 s and showed in the first tab to poll, while the README says every open tab; fix: every notification is pushed, the poll stays as fallback; routes.py
+  - evidence: build_test.py passed at 1.3.5: pytest 195 with test_non_immediate_ingest_pushes_and_queues, Galata 21 with the two-tab test showing the toast in both tabs
   - repro: open two tabs, POST {"message":"x"} to ingest without immediate, count the tabs that show the toast
   - test-tags: UNIT, E2E
   - root-cause: 2026-11-13T07:57:03Z @kj the push was written as an opt-in beside a single-consumer destructive poll queue, so the default path had no all-tabs delivery
   - log: 2026-11-13T07:57:03Z @kj added
+  - log: 2026-11-13T08:01:23Z @kj closed
 
 ## Security `SEC`
 
@@ -1467,11 +1469,13 @@ README and API reference accuracy against the code
   - log: 2026-11-13T07:14:02Z @kj added
   - log: 2026-11-13T07:14:27Z @kj closed
   - log: 2026-11-13T07:14:32Z @kj edited evidence "README.md 400 line now names a transient that is not true or false; test_routes.py test_transient_must_be_boolean-style parametrised case covers the 400" -> "README.md 400 line now names a transient that is not true or false; test_routes.py test_ingest_rejects_a_non_boolean_transient proves the 400"
-- [ ] `DEF-DOCS-283-PUSH-TEXT` **README, --now help, comments and a console warning describe the push as opt-in** - MINOR; with the push unconditional these sentences were false: README features, immediate row, CLI note, Immediate Delivery and Architecture, the --now help, routes.py and index.ts comments, the stream-down warning; fix: reworded; immediate and --now stay accepted with no effect on delivery
+- [x] `DEF-DOCS-283-PUSH-TEXT` **README, --now help, comments and a console warning describe the push as opt-in** - MINOR; with the push unconditional these sentences were false: README features, immediate row, CLI note, Immediate Delivery and Architecture, the --now help, routes.py and index.ts comments, the stream-down warning; fix: reworded; immediate and --now stay accepted with no effect on delivery
+  - evidence: README, the --now help, routes.py and index.ts comments and the stream-down warning now say every notification is pushed; no test matched the old strings
   - repro: read jupyterlab-notify --help for --now and the README Immediate Delivery section against routes.py
   - test-tags: MANUAL
   - root-cause: 2026-11-13T07:57:03Z @kj the text described the opt-in push that the ONE-TAB defect of category IMMED removed
   - log: 2026-11-13T07:57:03Z @kj added
+  - log: 2026-11-13T08:01:23Z @kj closed
 
 ## Test harness `TEST`
 
