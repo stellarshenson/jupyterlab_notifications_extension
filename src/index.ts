@@ -460,17 +460,17 @@ async function fetchAndDisplayNotifications(
  *
  * There is deliberately no give-up. The poll is a single-consumer destructive
  * drain (README, "Poll is best-effort"), so a tab that stops reconnecting does
- * not degrade to poll-only: it loses outright every --now notification that
+ * not degrade to poll-only: it loses outright every notification that
  * another tab's poll takes first. A give-up here made a server outage longer
- * than the budget disable immediate delivery for the life of the tab.
+ * than the budget disable push delivery for the life of the tab.
  */
 const RECONNECT_BASE_MS = 5000;
 const RECONNECT_MAX_MS = 60000;
 
 /**
- * Open a WebSocket to the server's notification stream for immediate
- * ("--now") delivery. Notifications pushed here display instantly rather
- * than waiting for the next poll. Reconnects with capped exponential backoff
+ * Open a WebSocket to the server's notification stream. The server pushes
+ * every notification here, so it displays instantly rather than waiting for
+ * the next poll. Reconnects with capped exponential backoff
  * for as long as the tab is open. While the socket is down this tab competes
  * for the destructive poll queue with every other tab and can miss a
  * notification outright, so reconnecting matters more than the retry cost.
@@ -520,7 +520,7 @@ function connectNotificationStream(app: JupyterFrontEnd): void {
       if (attempts === 1) {
         console.warn(
           'Notification stream disconnected; retrying in the background. ' +
-            'Immediate (--now) delivery is unavailable until it reconnects.'
+            'Push delivery is unavailable until it reconnects; the poll continues.'
         );
       }
       setTimeout(

@@ -262,8 +262,8 @@ async def test_immediate_ingest_pushes_to_listeners(jp_fetch):
     assert len(routes._notification_store) == 1
 
 
-async def test_non_immediate_ingest_does_not_push(jp_fetch):
-    """Without the flag the notification waits for the poll"""
+async def test_non_immediate_ingest_pushes_and_queues(jp_fetch):
+    """Without the flag the notification is pushed to every tab and still queued"""
     listener = _FakeListener()
     routes._stream_listeners.add(listener)
 
@@ -274,7 +274,8 @@ async def test_non_immediate_ingest_does_not_push(jp_fetch):
         body=json.dumps({"message": "Later"}),
     )
 
-    assert listener.messages == []
+    assert len(listener.messages) == 1
+    assert json.loads(listener.messages[0])["notifications"][0]["message"] == "Later"
     assert len(routes._notification_store) == 1
 
 

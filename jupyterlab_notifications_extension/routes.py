@@ -21,9 +21,10 @@ API_NAMESPACE = "jupyterlab-notifications-extension"
 # which resets to 0 on every fetch and could collide).
 _id_counter = itertools.count(1)
 
-# In-memory storage for pending notifications. Drained destructively by the
-# first client to poll - see NotificationFetchHandler - so this is a queue,
-# not a per-client mailbox.
+# In-memory storage for pending notifications: the fallback for a tab whose
+# socket is down or that opened later. Drained destructively by the first
+# client to poll - see NotificationFetchHandler - so this is a queue, not a
+# per-client mailbox.
 _notification_store: List[Dict] = []
 
 # The queue only drains when a client polls, so a server whose lab tabs are all
@@ -153,15 +154,15 @@ class NotificationIngestHandler(APIHandler):
             # Add to the poll queue. NOTE: the poll fetch is a
             # destructive, single-consumer drain - the first client to poll
             # empties the queue for all clients - so queue delivery is
-            # best-effort, not a per-client guarantee. Immediate ("--now")
-            # notifications are additionally pushed to every currently
-            # connected socket below for instant, all-tabs delivery.
+            # best-effort, not a per-client guarantee. Every notification
+            # is additionally pushed to every currently connected socket
+            # below for instant, all-tabs delivery; 'immediate' is accepted
+            # and no longer changes delivery.
             _notification_store.append(notification)
             if len(_notification_store) > MAX_QUEUED_NOTIFICATIONS:
                 del _notification_store[:-MAX_QUEUED_NOTIFICATIONS]
 
-            if payload.get('immediate'):
-                _push_immediate(notification, self.log)
+            _push_immediate(notification, self.log)
 
             self.finish(json.dumps({
                 "success": True,

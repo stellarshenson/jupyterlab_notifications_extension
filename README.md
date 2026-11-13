@@ -30,7 +30,7 @@ The command palette sends a notification by hand:
 - Action buttons that run any JupyterLab command
 - Markdown and sanitised HTML rendering, including colour and font-size spans
 - Dynamic time-ago indicator on every notification
-- 30-second polling, with an immediate WebSocket push for `--now`
+- WebSocket push of every notification to every open tab, with 30-second polling as the fallback
 - `transient` notifications that leave nothing in the notification center
 
 ## Agent Skill
@@ -83,7 +83,7 @@ Posts one notification. Authentication is an `Authorization: token <TOKEN>` head
 | `message`   | string         | Yes      | -        | Notification message, rendered as Markdown with limited HTML (see [Message Formatting](#message-formatting))                           |
 | `type`      | string         | No       | `"info"` | Visual style: `default`, `info`, `success`, `warning`, `error`, `in-progress`                                                          |
 | `autoClose` | number/boolean | No       | `5000`   | Milliseconds before auto-dismiss. `false` = manual dismiss only. `0` = silent mode (notification center only, no toast)                |
-| `immediate` | boolean        | No       | `false`  | Push instantly to connected clients via WebSocket instead of waiting for the next poll (see [Immediate Delivery](#immediate-delivery)) |
+| `immediate` | boolean        | No       | `false`  | Accepted for compatibility; no longer changes delivery, because every notification is pushed (see [Immediate Delivery](#immediate-delivery)) |
 | `transient` | boolean        | No       | `false`  | Dismiss the notification when its toast closes, so it does not remain in the notification center                                       |
 | `data`      | object         | No       | -        | Arbitrary JSON attached to the notification; every number in it must be finite                                                         |
 | `actions`   | array          | No       | `[]`     | Action buttons (see below)                                                                                                             |
@@ -172,7 +172,7 @@ Authentication:
 - **Server token** - sent to the address the server's runtime record is reached at: 127.0.0.1 for a server bound to 0.0.0.0, and the bound address for `--ip <address>`
 - **Ambient hub variables** - `JUPYTERHUB_API_TOKEN`, `JPY_API_TOKEN` and `JUPYTER_TOKEN` belong to this host, so they are sent only to a loopback target
 
-`--now` pushes over the WebSocket instead of waiting for the next poll.
+`--now` is accepted for compatibility and no longer changes delivery: every notification is pushed over the WebSocket.
 
 ### cURL
 
@@ -190,11 +190,11 @@ curl -X POST http://jupyterhub.example.com/user/alice/jupyterlab-notifications-e
 
 ## Immediate Delivery
 
-By default a notification waits up to 30 seconds for the next poll. `immediate` (REST) or `--now` (CLI) pushes it to every open tab over a WebSocket.
+Every notification is pushed to every open tab over a WebSocket and also queued for the 30-second poll. `immediate` (REST) and `--now` (CLI) are accepted for compatibility and no longer change delivery.
 
 - **Transport** - the frontend keeps a WebSocket open to `/jupyterlab-notifications-extension/stream`
 - **Every connected tab** - the push reaches all open tabs at once
-- **Best-effort poll** - the queue is a single-consumer destructive drain, so a tab whose socket is down at push time is not guaranteed that notification
+- **Best-effort poll** - the poll serves a tab whose socket is down or that opened later; the queue is a single-consumer destructive drain, so such a tab is not guaranteed that notification
 - **Keepalive** - ping and pong survive proxy idle timeouts, including behind JupyterHub
 - **De-duplication** - notification ids are tracked, so a notification arriving by both push and poll is shown once
 - **Reconnect** - capped exponential backoff from 5 to 60 seconds, retrying while the tab stays open
@@ -230,7 +230,7 @@ jupyterlab-notify -m '**Backup complete** in <span style="color: #2e7d32">12 min
 
 ## Architecture
 
-A notification is posted to one server; there is no per-recipient addressing. Flow: external POST → in-memory queue → frontend poll every 30 seconds → JupyterLab notification manager → queue cleared after the fetch. Notifications flagged `immediate` are also pushed over the WebSocket and deduplicated against the poll by id.
+A notification is posted to one server; there is no per-recipient addressing. Flow: external POST → WebSocket push to every open tab, and in-memory queue → frontend poll every 30 seconds → JupyterLab notification manager → queue cleared after the fetch. The push and poll copies are deduplicated by id.
 
 ## Troubleshooting
 

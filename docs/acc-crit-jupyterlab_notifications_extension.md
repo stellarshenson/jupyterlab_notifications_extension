@@ -165,7 +165,7 @@ Consolidated acceptance criteria, one `##` section per feature. `[ ]` todo / `[x
   - log: 2026-09-28T13:34:50Z @kj edited test-tags added "E2E"
   - log: 2026-09-28T17:13:59Z @kj closed
 - [x] `ACC-IMMED-17` **Edge: socket down at push (multi-tab)** - MEDIUM; a tab whose socket is down when the push fires is NOT guaranteed the notification via poll (destructive single-consumer drain); documented as best-effort, not a durable per-client queue
-  - evidence: Galata test posts without immediate to two open tabs and asserts exactly one shows it; mutation-proven, leaving the store uncleared on fetch fails it with 2
+  - evidence: README Immediate Delivery, Best-effort poll bullet, states it; the two-tab Galata test that showed the drain with a count of 1 now expects 2, because DEF-IMMED-282-ONE-TAB pushes every notification
   - test-tags: E2E
   - test: drop one tab's socket, send --now, check that tab after the next poll
   - log: 2026-07-15T00:00:00Z @kj behaviour accepted and documented (DEF-1); durable per-client delivery deferred
@@ -174,6 +174,7 @@ Consolidated acceptance criteria, one `##` section per feature. `[ ]` todo / `[x
   - log: 2026-09-28T13:34:50Z @kj edited test-tags added "E2E"
   - log: 2026-09-28T17:13:59Z @kj closed
   - log: 2026-09-28T17:13:59Z @kj the test proves the destructive single-consumer drain that makes poll delivery best-effort; no socket is dropped, because the criterion asserts an absence of guarantee, which no assertion can carry
+  - log: 2026-11-13T07:57:10Z @kj edited evidence "Galata test posts without immediate to two open tabs and asserts exactly one shows it; mutation-proven, leaving the store uncleared on fetch fails it with 2" -> "README Immediate Delivery, Best-effort poll bullet, states it; the two-tab Galata test that showed the drain with a count of 1 now expects 2, because DEF-IMMED-282-ONE-TAB pushes every notification"
 - [x] `ACC-IMMED-18` **Edge: server older than frontend** - MEDIUM; /stream 404s; reconnect backs off to the 60s ceiling and keeps retrying; poll still delivers
   - evidence: Galata test closes the stream with 1006 and asserts the poll still delivers within 40s and the retry stays at or under 5 attempts; mutation-proven, a constant 5s retry gives 7 and fails it
   - test-tags: E2E
@@ -197,15 +198,16 @@ Consolidated acceptance criteria, one `##` section per feature. `[ ]` todo / `[x
   - log: 2026-09-28T17:28:17Z @kj the give-up after RECONNECT_MAX_ATTEMPTS is not asserted at E2E: exhausting 10 attempts takes about 7.5 minutes of wall clock at the shipped 5s base and 60s cap
   - log: 2026-09-28T20:28:02Z @kj amended text "handshake rejected; reconnect gives up, degrades to poll-only, no 5s hammer loop" -> "MEDIUM; handshake rejected; reconnect backs off to the 60s ceiling and keeps retrying, warning once in the console; no 5s hammer loop"
   - log: 2026-09-28T20:28:03Z @kj edited test "rotate the token mid-session and watch the reconnect give up" -> "rotate the token mid-session and watch the reconnect back off without hammering"
-- [x] `ACC-IMMED-20` **Edge: `immediate` absent/falsy** - MEDIUM; no push; notification delivered by poll only
-  - evidence: the push runs only under payload.get('immediate')
+- [x] `ACC-IMMED-20` **Edge: `immediate` absent/falsy** - MEDIUM; pushed to every connected tab and queued for the poll, the same as with the flag; immediate is accepted and does not change delivery
+  - evidence: test_non_immediate_ingest_pushes_and_queues in test_routes.py; Galata posts without immediate to two tabs and both show it
   - test-tags: UNIT
-  - test: ingest without immediate and expect no push
+  - test: ingest without immediate and expect the push and the queued copy
   - log: 2026-07-15T00:00:00Z @kj implemented
   - log: 2026-09-28T13:31:47Z @kj edited importance added "MEDIUM"
   - log: 2026-09-28T13:34:51Z @kj edited test added "ingest without immediate and expect no push"
   - log: 2026-09-28T13:34:51Z @kj edited test-tags added "UNIT"
   - log: 2026-09-28T13:34:51Z @kj edited evidence added "the push runs only under payload.get('immediate')"
+  - log: 2026-11-13T07:57:10Z @kj edited title "Edge: `immediate` absent/falsy" -> "Edge: `immediate` absent/falsy"; text "no push; notification delivered by poll only" -> "pushed to every connected tab and queued for the poll, the same as with the flag; immediate is accepted and does not change delivery"; test "ingest without immediate and expect no push" -> "ingest without immediate and expect the push and the queued copy"; evidence "the push runs only under payload.get('immediate')" -> "test_non_immediate_ingest_pushes_and_queues in test_routes.py; Galata posts without immediate to two tabs and both show it"; reason: DEF-IMMED-282-ONE-TAB made the push unconditional
 - [x] `ACC-IMMED-21` **Edge: no listeners connected** - LOW; push is a no-op; poll delivers on next cycle
   - evidence: test_push_immediate_with_no_listeners_is_a_noop proves the empty-set call raises nothing and logs no spurious warning; it cannot prove the absence itself, which no assertion carries
   - test-tags: UNIT

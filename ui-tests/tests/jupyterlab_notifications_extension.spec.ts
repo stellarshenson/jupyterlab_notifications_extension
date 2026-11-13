@@ -325,10 +325,9 @@ test('should place time-ago inline with action buttons', async ({ page }) => {
 });
 
 /**
- * The --now path and the poll path have different delivery guarantees, and the
- * difference is the reason the WebSocket exists. These three tests hold the
- * distinction: a push reaches every open tab promptly, a polled notification
- * reaches exactly one, because the fetch is a destructive single-consumer drain.
+ * Every notification is pushed over the WebSocket and also queued for the poll.
+ * These three tests hold that: a push reaches every open tab promptly, with or
+ * without the immediate flag, and the poll copy does not show a second toast.
  */
 
 /** Wait until the lab shell is up and the extension's socket has had time to open. */
@@ -388,7 +387,7 @@ test('should show an --now notification in every open tab', async ({
   await second.close();
 });
 
-test('should hand a polled notification to exactly one tab', async ({
+test('should show a notification without the immediate flag in every open tab', async ({
   page
 }) => {
   await page.goto();
@@ -399,8 +398,8 @@ test('should hand a polled notification to exactly one tab', async ({
   await second.goto(url);
   await labReady(second);
 
-  // No immediate flag, so this one travels only by the poll fetch, which
-  // empties the queue for whichever tab asks first.
+  // No immediate flag: the server still pushes it to every open tab, and the
+  // poll copy that one tab also fetches is de-duplicated by id.
   const baseUrl = url.replace(/\/lab.*$/, '');
   await page.request.post(
     `${baseUrl}/jupyterlab-notifications-extension/ingest`,
@@ -414,7 +413,7 @@ test('should hand a polled notification to exactly one tab', async ({
   await page.waitForTimeout(35000);
 
   const seen = (await count(page)) + (await count(second));
-  expect(seen).toBe(1);
+  expect(seen).toBe(2);
 
   await second.close();
 });

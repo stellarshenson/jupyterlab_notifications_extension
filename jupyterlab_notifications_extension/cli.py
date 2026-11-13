@@ -741,9 +741,8 @@ exit codes:
         "--now",
         action="store_true",
         dest="immediate",
-        help="Push to every open tab now. Without this the notification waits "
-             "for the next poll, and the first tab to poll is the only one "
-             "that receives it"
+        help="Accepted for compatibility; no longer changes delivery. Every "
+             "notification is pushed to every open tab now"
     )
     parser.add_argument(
         "--transient",
