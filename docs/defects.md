@@ -1710,10 +1710,12 @@ The pytest, jest and Galata tiers and the configuration that runs them
   - root-cause: 2026-10-06T22:33:57Z @kj the depth is the interpreter's limit, not this package's, and nothing in the test checked that the payload still raised
   - log: 2026-10-06T22:33:57Z @kj added
   - log: 2026-10-06T22:34:02Z @kj closed
-- [ ] `DEF-TEST-281-PAYPAL-LINK` **Check Links job fails on the PayPal donate badge** - MINOR; Build / Check Links red at HEAD: https://www.paypal.com/donate/ in README.md answers 403 to the GitHub runner, so every push shows a failed Build
+- [x] `DEF-TEST-281-PAYPAL-LINK` **Check Links job fails on the PayPal donate badge** - MINOR; Build / Check Links red at HEAD: https://www.paypal.com/donate/ in README.md answers 403 to the GitHub runner, so every push shows a failed Build
+  - evidence: https://www.paypal.com/.* in ignore_links of build.yml; Build run 43386066874 green at 566c195
   - repro: push to main; job Build / Check Links fails with 403: Forbidden on the README PayPal link
   - root-cause: 2026-11-13T07:28:59Z @kj paypal.com refuses the automated checker; the badge was added without the host in ignore_links of build.yml
   - log: 2026-11-13T07:28:59Z @kj added
+  - log: 2026-11-13T07:38:20Z @kj closed
 
 ## Time-ago indicator `TIME`
 
