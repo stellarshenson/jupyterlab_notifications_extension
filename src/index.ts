@@ -250,6 +250,17 @@ function injectTimeAgoIntoCenter(center: Element): void {
 }
 
 /**
+ * The toasts a node is or holds. react-toastify inserts the toast container
+ * once, holding every toast committed in the same render, so one added or
+ * removed node can hold several toasts.
+ */
+function toastsIn(node: HTMLElement): HTMLElement[] {
+  return node.classList.contains('Toastify__toast')
+    ? [node]
+    : Array.from(node.querySelectorAll<HTMLElement>('.Toastify__toast'));
+}
+
+/**
  * Set up a MutationObserver to watch for the Notification Center
  * opening and for any toast popup appearing, injecting time-ago
  * indicators into both.
@@ -267,12 +278,11 @@ function observeNotificationCenter(): void {
         if (!(node instanceof HTMLElement)) {
           continue;
         }
-        const toast = node.classList.contains('Toastify__toast')
-          ? node
-          : node.querySelector('.Toastify__toast');
-        if (toast instanceof HTMLElement && transientIds.has(toast.id)) {
-          Notification.manager.dismiss(toast.id);
-          transientIds.delete(toast.id);
+        for (const toast of toastsIn(node)) {
+          if (transientIds.has(toast.id)) {
+            Notification.manager.dismiss(toast.id);
+            transientIds.delete(toast.id);
+          }
         }
       }
       for (let i = 0; i < mutation.addedNodes.length; i++) {
@@ -300,10 +310,7 @@ function observeNotificationCenter(): void {
           continue;
         }
         // Catch toast popups (from any source, not just our extension)
-        const toast = node.classList.contains('Toastify__toast')
-          ? node
-          : node.querySelector('.Toastify__toast');
-        if (toast instanceof HTMLElement) {
+        for (const toast of toastsIn(node)) {
           // Apply now; the timeout below retries once the toast DOM settles.
           injectTimeAgoIntoToast(toast);
           setTimeout(() => injectTimeAgoIntoToast(toast), DOM_SETTLE_MS);

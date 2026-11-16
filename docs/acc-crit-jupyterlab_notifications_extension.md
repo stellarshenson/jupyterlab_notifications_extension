@@ -467,4 +467,11 @@ Markdown and a small sanitised HTML subset rendered in notifications this extens
   - mechanism: 2026-11-04T19:24:48Z @kj argparse --transient is passed to send_notification_api, which sets payload transient true only when the flag is given; README documents the field and a --transient example
   - log: 2026-11-04T19:24:48Z @kj added
   - log: 2026-11-04T19:24:55Z @kj closed
+- [x] `ACC-FORMAT-49-BATCH` **Every toast of a batch rendered** - HIGH; Every toast this extension creates shows its Markdown rendered, including toasts that arrive together in one batch, for example after the browser tab resumes from sleep
+  - evidence: Galata 'should render every toast of a batch delivered at once' passes in the 23-passed full run (tmp/workflows/wake-duplicate/close-raw-galata-full.log); make test exit 0 (close-raw-make-test.log); lint:check exit 0 (close-raw-r2-lint.log)
+  - test: run the Galata case 'should render every toast of a batch delivered at once' and read strong and no literal ** in each toast of the batch
+  - test-tags: E2E
+  - mechanism: 2026-11-16T09:42:43Z @kj observeNotificationCenter passes every .Toastify__toast an added node is or holds (toastsIn) to injectTimeAgoIntoToast, so a toast container inserted once holding several toasts renders each; the removedNodes branch dismisses every transient toast of a removed node the same way
+  - log: 2026-11-16T09:42:43Z @kj added
+  - log: 2026-11-16T09:42:49Z @kj closed
 

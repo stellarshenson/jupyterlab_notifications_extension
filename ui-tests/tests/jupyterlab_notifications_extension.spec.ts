@@ -737,3 +737,162 @@ test('should leave a JupyterLab native notification as plain text', async ({
   await expect(message.locator('span')).toHaveCount(0);
   await expect(message).toContainText('Native probe **bold**');
 });
+
+/**
+ * A vault unlock request in the shape the passkey extension sends: bold
+ * caller name, a button, and the wait in data.
+ */
+const vaultUnlockRequest = (caller: string) => ({
+  message: `**${caller}**: Unlock the vault with your passkey`,
+  type: 'info',
+  autoClose: false,
+  immediate: true,
+  actions: [
+    {
+      label: 'Unlock vault',
+      displayType: 'default',
+      commandId: 'passkey:vault-unlock',
+      args: { nonce: 'wake-probe' }
+    }
+  ],
+  data: { command: 'passkey:vault-unlock', seconds: 120 }
+});
+
+/** Each toast message holding `text`, read as rendered Markdown or not. */
+function toastCopies(page: any, text: string) {
+  return page
+    .locator('.Toastify__toast .jp-toast-message', { hasText: text })
+    .evaluateAll((elements: Element[]) =>
+      elements.map(el => ({
+        strong: el.querySelector('strong') !== null,
+        rawMarkdown: (el.textContent || '').includes('**')
+      }))
+    );
+}
+
+/**
+ * The server queue is process-global and an earlier test's notifications wait
+ * in it; the page's first poll would show them, and a toast already on screen
+ * hides the batch defect these tests reproduce.
+ */
+async function drainServerQueue(page: any): Promise<void> {
+  const response = await page.request.get(
+    '/jupyterlab-notifications-extension/notifications'
+  );
+  expect(response.ok()).toBe(true);
+}
+
+/**
+ * The owner's screenshot: with the laptop lid closed the tab is suspended
+ * while the server keeps running, and on wake the vault unlock requests of two
+ * callers showed, one rendered and one with raw Markdown. The lid is modelled
+ * by freezing the page through CDP and taking the browser offline while the
+ * CLI posts.
+ */
+test('should show the request of each caller raised while the tab was suspended once, rendered', async ({
+  page
+}) => {
+  await drainServerQueue(page);
+  await page.goto();
+  await labReady(page);
+  await expect(page.locator('.Toastify__toast')).toHaveCount(0);
+
+  // galata wraps the fixture page; a CDP session needs the underlying Page.
+  const tab = page
+    .context()
+    .pages()
+    .find((p: any) => p.url() === page.url());
+  const cdp = await page.context().newCDPSession(tab);
+  await cdp.send('Page.setWebLifecycleState', { state: 'frozen' });
+  await page.context().setOffline(true);
+
+  // The two callers of the screenshot, each raising its own request.
+  const callers = [
+    'jupyterlab_workspace_manager_extension',
+    'jupyterlab_export_markdown_extension'
+  ];
+  for (const caller of callers) {
+    await postNotification(page, vaultUnlockRequest(caller));
+  }
+
+  await page.context().setOffline(false);
+  await cdp.send('Page.setWebLifecycleState', { state: 'active' });
+
+  // One poll cycle plus margin, so every copy the server holds has arrived.
+  await page.waitForTimeout(35000);
+  for (const caller of callers) {
+    expect(await toastCopies(page, caller)).toEqual([
+      { strong: true, rawMarkdown: false }
+    ]);
+  }
+});
+
+/**
+ * The raw copy's mechanism alone: with no toast on screen, notifications
+ * displayed in one task land in one react-toastify commit, which inserts the
+ * toast container once with all of them inside. The page keeps a socket the
+ * server never sees, as after a suspended tab's socket timed out, so one poll
+ * response hands both over together.
+ */
+test('should render every toast of a batch delivered at once', async ({
+  page
+}) => {
+  await page
+    .context()
+    .routeWebSocket(/jupyterlab-notifications-extension\/stream/, () => {});
+  await drainServerQueue(page);
+  await page.goto();
+  await labReady(page);
+  await expect(page.locator('.Toastify__toast')).toHaveCount(0);
+
+  await postNotification(page, {
+    message: 'Batch probe **first**',
+    autoClose: false
+  });
+  await postNotification(page, {
+    message: 'Batch probe **second**',
+    autoClose: false
+  });
+
+  await expect(
+    page.locator('.jp-toast-message', { hasText: 'Batch probe' })
+  ).toHaveCount(2, { timeout: 40000 });
+  await expect
+    .poll(() => toastCopies(page, 'Batch probe'), { timeout: 5000 })
+    .toEqual([
+      { strong: true, rawMarkdown: false },
+      { strong: true, rawMarkdown: false }
+    ]);
+});
+
+/**
+ * Transient toasts committed together close together, and react-toastify then
+ * removes the toast container once with all of them inside. Every entry must
+ * leave the notification centre; the status bar count shows that without
+ * opening the centre, whose render would reconcile a missed entry.
+ */
+test('should drop every transient entry of a batch whose toasts close at once', async ({
+  page
+}) => {
+  await page
+    .context()
+    .routeWebSocket(/jupyterlab-notifications-extension\/stream/, () => {});
+  await drainServerQueue(page);
+  await page.goto();
+  await labReady(page);
+  await expect(page.locator('.Toastify__toast')).toHaveCount(0);
+  const count = page.locator('.jp-Notification-Status-Text');
+  await expect(count).toHaveText('0');
+
+  for (const message of ['Transient batch first', 'Transient batch second']) {
+    await postNotification(page, { message, transient: true, autoClose: 3000 });
+  }
+
+  await expect(
+    page.locator('.jp-toast-message', { hasText: 'Transient batch' })
+  ).toHaveCount(2, { timeout: 40000 });
+  await expect(page.locator('.Toastify__toast')).toHaveCount(0, {
+    timeout: 15000
+  });
+  await expect(count).toHaveText('0');
+});
