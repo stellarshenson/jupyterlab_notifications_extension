@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.8] - 2026-11-17
+
+### Fixed
+
+- Render the Markdown of every toast when several notifications arrive at once, for example in the first poll after a laptop wake; before, only the first toast was rendered and the others showed raw Markdown characters
+- Remove every transient notification from the notification centre when several toasts close at once
+
 ## [1.3.7] - 2026-11-13
 
 ### Changed
