@@ -6,13 +6,14 @@ import {
 import { ICommandPalette, Dialog, Notification } from '@jupyterlab/apputils';
 import { URLExt } from '@jupyterlab/coreutils';
 import { ServerConnection } from '@jupyterlab/services';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 import { Widget } from '@lumino/widgets';
 import {
   ReadonlyJSONValue,
   ReadonlyPartialJSONObject
 } from '@lumino/coreutils';
 
-import { renderNotificationHtml } from './render';
+import { loadMarked, renderNotificationHtml } from './render';
 import { requestAPI, API_NAMESPACE } from './request';
 import { formatTimeAgo, reconnectDelay } from './utils';
 
@@ -553,19 +554,73 @@ const plugin: JupyterFrontEndPlugin<void> = {
     'JupyterLab extension that shows notifications sent by a JupyterHub administrator or by a script, as a toast and in the notification center.',
   autoStart: true,
   requires: [ICommandPalette],
-  activate: (app: JupyterFrontEnd, palette: ICommandPalette) => {
+  optional: [ITranslator],
+  activate: (
+    app: JupyterFrontEnd,
+    palette: ICommandPalette,
+    translator: ITranslator | null
+  ) => {
     // The exact message is required by the extension template and asserted by
     // the Galata suite; the level is not - Playwright captures debug too.
     console.debug(
       'JupyterLab extension @stellarshenson/jupyterlab-notifications-extension is activated!'
     );
 
+    const trans = (translator ?? nullTranslator).load(
+      'jupyterlab_notifications_extension'
+    );
+
     // Register command to send notifications
     const commandId = 'jupyterlab-notifications:send';
     app.commands.addCommand(commandId, {
-      label: 'Send Notification',
-      caption:
-        'Send a notification to every open tab of this JupyterLab server',
+      label: trans.__('Send Notification'),
+      caption: trans.__(
+        'Send a notification to every open tab of this JupyterLab server'
+      ),
+      describedBy: {
+        args: {
+          type: 'object',
+          properties: {
+            message: {
+              type: 'string',
+              description: 'Notification text; the dialog opens when absent'
+            },
+            type: {
+              type: 'string',
+              enum: [
+                'default',
+                'info',
+                'success',
+                'warning',
+                'error',
+                'in-progress'
+              ]
+            },
+            autoClose: {
+              anyOf: [{ type: 'number' }, { const: false }],
+              description: 'Milliseconds before the toast closes, or false'
+            },
+            actions: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  caption: { type: 'string' },
+                  displayType: {
+                    type: 'string',
+                    enum: ['default', 'accent', 'warn', 'link']
+                  },
+                  commandId: { type: 'string' },
+                  args: { type: 'object' }
+                },
+                required: ['label']
+              }
+            },
+            data: { description: 'Any JSON value, passed to the notification' }
+          }
+        }
+      },
       execute: async (args: any) => {
         let message = args.message as string;
         let type = (args.type as string) || 'info';
@@ -590,8 +645,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
           // contradict an administrator who believes it reaches everyone.
           const audience = document.createElement('div');
           audience.id = 'jp-notify-audience';
-          audience.textContent =
-            'Goes to every open tab of this server. Other users are not reached.';
+          audience.textContent = trans.__(
+            'Goes to every open tab of this server. Other users are not reached.'
+          );
           // 10px on top of the body's own 10px gap, so the notice reads as
           // separate from the form rather than as its first row.
           audience.style.marginBottom = '10px';
@@ -602,12 +658,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
           // Message input
           const messageLabel = document.createElement('label');
-          messageLabel.textContent = 'Message:';
+          messageLabel.textContent = trans.__('Message:');
           messageLabel.htmlFor = 'jp-notify-message';
           const messageInput = document.createElement('input');
           messageInput.id = 'jp-notify-message';
           messageInput.type = 'text';
-          messageInput.placeholder = 'Enter notification message';
+          messageInput.placeholder = trans.__('Enter notification message');
           // Makes the Dialog disable Send while the field is empty, and the
           // wrapper further down paints the field. It blocks the first Enter
           // only because of the dialog.ready dispatch below - Dialog starts
@@ -628,14 +684,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
           // says why the field turned red. Not the native validation bubble:
           // there is no form here and nothing calls reportValidity, so no
           // bubble can appear.
-          messageInput.title =
-            'Enter at least one character that is not a space.';
+          messageInput.title = trans.__(
+            'Enter at least one character that is not a space.'
+          );
           messageInput.style.width = '100%';
           messageInput.style.padding = '5px';
 
           // Type select
           const typeLabel = document.createElement('label');
-          typeLabel.textContent = 'Type:';
+          typeLabel.textContent = trans.__('Type:');
           typeLabel.htmlFor = 'jp-notify-type';
           const typeSelect = document.createElement('select');
           typeSelect.id = 'jp-notify-type';
@@ -670,7 +727,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
           const autoCloseLabel = document.createElement('label');
           autoCloseLabel.htmlFor = 'jp-notify-auto-close';
-          autoCloseLabel.textContent = 'Auto-close after';
+          autoCloseLabel.textContent = trans.__('Auto-close after');
           autoCloseLabel.style.cursor = 'pointer';
 
           const autoCloseInput = document.createElement('input');
@@ -684,11 +741,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
           // the centre and never appear on screen. `false` is not a number and
           // is shown, which the manual-dismiss path relies on.
           autoCloseInput.required = true;
-          autoCloseInput.setAttribute('aria-label', 'Auto-close seconds');
+          autoCloseInput.setAttribute(
+            'aria-label',
+            trans.__('Auto-close seconds')
+          );
           // Nothing associates the visible label below with this input, so
           // this title is still the field's accessible description. It is no
           // longer the only statement of the rule, but it is not removable.
-          autoCloseInput.title = 'Whole seconds, one or more.';
+          autoCloseInput.title = trans.__('Whole seconds, one or more.');
           autoCloseInput.style.width = '60px';
           autoCloseInput.style.padding = '3px';
 
@@ -697,7 +757,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
           // "1 or more" described a range the control rejects. This puts the
           // whole rule on screen; the title above still carries it for
           // assistive technology, which this span is not associated with.
-          secondsLabel.textContent = 'seconds (whole number, 1 or more)';
+          secondsLabel.textContent = trans.__(
+            'seconds (whole number, 1 or more)'
+          );
 
           autoCloseContainer.appendChild(autoCloseCheckbox);
           autoCloseContainer.appendChild(autoCloseLabel);
@@ -732,7 +794,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
           const dismissLabel = document.createElement('label');
           dismissLabel.htmlFor = 'jp-notify-dismiss';
-          dismissLabel.textContent = 'Include dismiss button';
+          dismissLabel.textContent = trans.__('Include dismiss button');
           dismissLabel.style.cursor = 'pointer';
 
           dismissContainer.appendChild(dismissCheckbox);
@@ -762,11 +824,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
           const widget = new Widget({ node: body });
 
           const dialog = new Dialog({
-            title: 'Send Notification',
+            title: trans.__('Send Notification'),
             body: widget,
             buttons: [
               Dialog.cancelButton(),
-              Dialog.okButton({ label: 'Send' })
+              Dialog.okButton({ label: trans.__('Send') })
             ],
             // Addressed by id, not position: 'input' would silently move to
             // whatever field someone inserts above the message field.
@@ -785,7 +847,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
           // has nothing to attach to. The node is a native <dialog> with
           // ariaModal already set there, so the role and the modality are not
           // ours to add.
-          dialog.node.setAttribute('aria-label', 'Send Notification');
+          dialog.node.setAttribute('aria-label', trans.__('Send Notification'));
 
           // Dialog computes its accept-button state only from its own `input`
           // handler, which it registers in onAfterAttach, so an untouched form
@@ -817,8 +879,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
             actions = dismissCheckbox.checked
               ? [
                   {
-                    label: 'Dismiss',
-                    caption: 'Close this notification',
+                    label: trans.__('Dismiss'),
+                    caption: trans.__('Close this notification'),
                     displayType: 'default'
                   }
                 ]
@@ -867,26 +929,44 @@ const plugin: JupyterFrontEndPlugin<void> = {
     });
 
     // Add command to palette
-    palette.addItem({ command: commandId, category: 'Notifications' });
+    palette.addItem({
+      command: commandId,
+      category: trans.__('Notifications')
+    });
 
     // Watch for Notification Center opening to inject time-ago
     observeNotificationCenter();
 
-    // Fetch notifications immediately on startup
-    fetchAndDisplayNotifications(app);
+    // Poll and stream are the only paths to displayNotification, so starting
+    // them once marked has loaded means no owned notification can render
+    // before the parser exists. Not awaited: activate must not delay the
+    // application start. A failed load starts no poll, so nothing is drained.
+    loadMarked().then(
+      () => {
+        // Fetch notifications immediately on startup
+        fetchAndDisplayNotifications(app);
 
-    // Set up periodic polling for new notifications (baseline/fallback)
-    setInterval(() => {
-      fetchAndDisplayNotifications(app);
-    }, POLL_INTERVAL);
+        // Set up periodic polling for new notifications (baseline/fallback)
+        setInterval(() => {
+          fetchAndDisplayNotifications(app);
+        }, POLL_INTERVAL);
 
-    // Opened last, and deliberately: anything the WebSocket constructor throws
-    // propagates out of activate, so connecting first would have taken the poll
-    // baseline down with it - the opposite of what the socket is a bonus to.
-    connectNotificationStream(app);
+        // Opened last, and deliberately: anything the WebSocket constructor
+        // throws ends this callback, so connecting first would have taken the
+        // poll baseline down with it - the opposite of what the socket is a
+        // bonus to.
+        connectNotificationStream(app);
 
-    console.debug(
-      `Notification polling started (interval: ${POLL_INTERVAL / 1000}s)`
+        console.debug(
+          `Notification polling started (interval: ${POLL_INTERVAL / 1000}s)`
+        );
+      },
+      reason => {
+        console.error(
+          'Notifications not started: the markdown parser failed to load',
+          reason
+        );
+      }
     );
   }
 };

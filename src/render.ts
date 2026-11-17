@@ -1,5 +1,17 @@
 import DOMPurify from 'dompurify';
-import { marked } from 'marked';
+
+/**
+ * The markdown parser, kept out of the startup bundle. Set by loadMarked(),
+ * which activation awaits before it displays any notification.
+ */
+let marked: typeof import('marked').marked | null = null;
+
+/**
+ * Load the markdown parser. Must resolve before renderNotificationHtml runs.
+ */
+export async function loadMarked(): Promise<void> {
+  ({ marked } = await import('marked'));
+}
 
 /**
  * Everything a sender may produce. `FORBID_TAGS` and `FORBID_ATTR` restate the
@@ -203,6 +215,9 @@ function truncateRenderedHtml(html: string): string {
  * budget. Sanitising first means truncation cannot create markup.
  */
 export function renderNotificationHtml(raw: string): string {
+  if (marked === null) {
+    throw new Error('renderNotificationHtml called before loadMarked resolved');
+  }
   const html = marked.parse(messageSource(raw), {
     gfm: true,
     breaks: true,

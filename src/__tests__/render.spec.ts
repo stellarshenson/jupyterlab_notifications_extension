@@ -1,4 +1,13 @@
-import { renderNotificationHtml } from '../render';
+import { loadMarked, renderNotificationHtml } from '../render';
+
+beforeAll(() => loadMarked());
+
+it('throws when called before loadMarked resolves', async () => {
+  await jest.isolateModulesAsync(async () => {
+    const fresh = await import('../render');
+    expect(() => fresh.renderNotificationHtml('x')).toThrow('loadMarked');
+  });
+});
 
 function renderInto(raw: string): HTMLElement {
   const container = document.createElement('div');

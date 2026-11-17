@@ -36,7 +36,7 @@ export async function requestAPI<T>(
   if (data.length > 0) {
     try {
       data = JSON.parse(data);
-    } catch (error) {
+    } catch {
       console.warn('Not a JSON response body.', response);
     }
   }
