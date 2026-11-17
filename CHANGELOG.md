@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## [1.3.9] - 2026-11-17
+
+### Changed
+
+- User-visible strings of the send dialog and command go through JupyterLab's translator; the English text is unchanged
+- The Markdown parser `marked` loads on demand before the first notification is displayed, instead of with the extension's main module
+- The send command describes its arguments for JupyterLab's command tools
+
+### Fixed
+
+- All 21 eslint warnings in `src/`; `lint:check` now reports 0 warnings
+
 ## [1.3.8] - 2026-11-17
 
 ### Fixed
